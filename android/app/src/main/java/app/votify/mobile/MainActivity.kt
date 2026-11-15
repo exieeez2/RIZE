@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         enableHighRefreshRate()
         requestNotificationPermissionIfNeeded()
-        disableLegacyAliases()
+        restoreAliasesCompatibility()
         setContent {
             // VotifyRoot applies VotifyTheme itself (the palette comes from user settings).
             VotifyRoot()
@@ -58,16 +58,17 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Disables any legacy activity-alias entries from earlier versions so only the main RIZE icon
-     * exists in the launcher without any duplicates or overlay issues.
+     * Resets any previously disabled legacy alias states to DEFAULT so any existing home screen
+     * shortcuts from older versions can cleanly resolve to MainActivity without being redirected
+     * to system App Info.
      */
-    private fun disableLegacyAliases() {
-        val legacy = listOf("Crimson", "Mono", "Mint", "Lime", "Violet", "Bw", "Glass", "Classic", "Custom")
+    private fun restoreAliasesCompatibility() {
+        val legacy = listOf("Current", "Crimson", "Mono", "Mint", "Lime", "Violet", "Bw", "Glass", "Classic", "Custom")
         legacy.forEach { suffix ->
             runCatching {
                 packageManager.setComponentEnabledSetting(
                     android.content.ComponentName(this, "app.votify.mobile.VotifyLauncher.$suffix"),
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
                     PackageManager.DONT_KILL_APP
                 )
             }
