@@ -198,12 +198,11 @@ class AppUpdateManager(
 
     private suspend fun fetchUpdateInfo(): UpdateInfo? = withContext(Dispatchers.IO) {
         val urls = listOf(
+            "https://raw.githubusercontent.com/exieeez2/RIZE/main/version.json?t=${System.currentTimeMillis()}",
+            "https://raw.githubusercontent.com/exieeez2/RIZE/main/android/version.json?t=${System.currentTimeMillis()}",
             "https://gitlab.com/exieeez/rize/-/raw/apk/version.json?inline=false&t=${System.currentTimeMillis()}",
             "https://gitlab.com/exieeez/rize/-/raw/releases/latest-android.json?inline=false&t=${System.currentTimeMillis()}",
-            "https://raw.githubusercontent.com/exieeez/RIZE/apk/version.json?t=${System.currentTimeMillis()}",
-            "https://cdn.jsdelivr.net/gh/exieeez/RIZE@apk/version.json?t=${System.currentTimeMillis()}",
-            "https://fastly.jsdelivr.net/gh/exieeez/RIZE@apk/version.json?t=${System.currentTimeMillis()}",
-            "https://raw.githack.com/exieeez/RIZE/apk/version.json"
+            "https://cdn.jsdelivr.net/gh/exieeez2/RIZE@main/version.json?t=${System.currentTimeMillis()}"
         )
         val deferreds = urls.map { url ->
             async {
@@ -252,8 +251,8 @@ class AppUpdateManager(
                 info.url.ifBlank { null },
                 info.releaseUrl.ifBlank { null },
                 info.mirrorUrl.ifBlank { null },
+                "https://github.com/exieeez2/RIZE/releases/download/v1.4.0/RIZE-v1.4.0.apk",
                 "https://gitlab.com/exieeez/rize/-/raw/releases/RIZE.apk?inline=false",
-                "https://gitlab.com/exieeez/rize/-/raw/apk/RIZE-debug.apk?inline=false",
                 info.downloadUrl.ifBlank { null },
                 info.cdnUrl.ifBlank { null }
             )
