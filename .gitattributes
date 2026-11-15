@@ -1,26 +1,23 @@
-# GitHub Linguist Language Detection Configuration
-# https://github.com/github-linguist/linguist/blob/master/docs/overrides.md
+# GitHub Linguist Configuration
+# Only count Rust and Kotlin in repository language statistics
 
-# Mark third-party vendor code and libraries as vendored
-src/vendor/** linguist-vendored
-src/assets/** linguist-vendored
-src/vendor/* linguist-vendored
-src/assets/* linguist-vendored
+* -linguist-detectable
+* linguist-vendored
 
-# Mark WebView frontend UI layers as vendored to highlight native Rust & Kotlin cores
-src/** linguist-vendored
-routes/** linguist-vendored
-android/app/src/main/assets/** linguist-vendored
-*.js linguist-vendored
-*.html linguist-vendored
-*.css linguist-vendored
-*.py linguist-vendored
+# Rust Tauri Core
+*.rs linguist-detectable linguist-language=Rust -linguist-vendored
+src-tauri/**/*.rs linguist-detectable linguist-language=Rust -linguist-vendored
+src-tauri/** linguist-detectable linguist-language=Rust -linguist-vendored
 
-# Mark test suites, scripts and mockups as documentation
-test/** linguist-documentation
-scripts/** linguist-documentation
-design/** linguist-documentation
+# Kotlin Jetpack Compose Core
+*.kt linguist-detectable linguist-language=Kotlin -linguist-vendored
+*.kts linguist-detectable linguist-language=Kotlin -linguist-vendored
+android/app/src/main/java/**/*.kt linguist-detectable linguist-language=Kotlin -linguist-vendored
 
-# Ensure native Rust backend and Android Kotlin are the primary detectable languages
-src-tauri/**/*.rs linguist-detectable=true
-android/app/src/main/**/*.kt linguist-detectable=true
+# Vendor everything else
+src/** linguist-vendored -linguist-detectable
+routes/** linguist-vendored -linguist-detectable
+test/** linguist-documentation -linguist-detectable
+scripts/** linguist-documentation -linguist-detectable
+design/** linguist-documentation -linguist-detectable
+android/app/src/main/assets/** linguist-vendored -linguist-detectable
