@@ -1,0 +1,26 @@
+# GitHub Linguist Language Detection Configuration
+# https://github.com/github-linguist/linguist/blob/master/docs/overrides.md
+
+# Mark third-party vendor code and libraries as vendored
+src/vendor/** linguist-vendored
+src/assets/** linguist-vendored
+src/vendor/* linguist-vendored
+src/assets/* linguist-vendored
+
+# Mark WebView frontend UI layers as vendored to highlight native Rust & Kotlin cores
+src/** linguist-vendored
+routes/** linguist-vendored
+android/app/src/main/assets/** linguist-vendored
+*.js linguist-vendored
+*.html linguist-vendored
+*.css linguist-vendored
+*.py linguist-vendored
+
+# Mark test suites, scripts and mockups as documentation
+test/** linguist-documentation
+scripts/** linguist-documentation
+design/** linguist-documentation
+
+# Ensure native Rust backend and Android Kotlin are the primary detectable languages
+src-tauri/**/*.rs linguist-detectable=true
+android/app/src/main/**/*.kt linguist-detectable=true
