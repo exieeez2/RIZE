@@ -12,7 +12,7 @@
     <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Core-Rust_2024-dea584?style=for-the-badge&logo=rust&logoColor=white" alt="Rust" /></a>
     <a href="https://tauri.app/"><img src="https://img.shields.io/badge/Desktop-Tauri_2.0-24C8D8?style=for-the-badge&logo=tauri&logoColor=white" alt="Tauri 2" /></a>
     <a href="https://developer.android.com/"><img src="https://img.shields.io/badge/Mobile-Android_Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android" /></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge" alt="GPL-3.0 License" /></a>
   </p>
 
   <p align="center">
@@ -139,7 +139,7 @@ cd android
 
 ## 📄 Лицензия
 
-Этот проект распространяется под свободной лицензией **MIT**. Подробности в файле [LICENSE](LICENSE).
+Этот проект распространяется под свободной лицензией **GNU GPL v3.0**. Подробности в файле [LICENSE](LICENSE).
 
 ---
 
