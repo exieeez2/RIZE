@@ -1,0 +1,248 @@
+package app.votify.mobile.player
+
+import android.app.PendingIntent
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
+import androidx.core.graphics.drawable.toBitmap
+import app.votify.mobile.MainActivity
+import app.votify.mobile.VotifyApp
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
+import kotlinx.coroutines.launch
+
+/**
+ * Background playback: keeps ExoPlayer alive in a foreground service and exposes it through
+ * a MediaSession so the notification, lock screen, headset buttons and Android Auto all work.
+ *
+ * Queue items use the `votify://stream/<id>` scheme. A [ResolvingDataSource] maps that to the
+ * real audio URL just before every connection: the PC server's /api/stream proxy when a server
+ * is configured, or a direct YouTube/SoundCloud audio URL extracted on-device otherwise.
+ */
+class PlaybackService : MediaSessionService() {
+
+    @UnstableApi
+    override fun onCreate() {
+        super.onCreate()
+
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(60_000)
+            .setAllowCrossProtocolRedirects(true)
+
+        val baseFactory = DefaultDataSource.Factory(this, httpFactory)
+        val resolvingFactory = ResolvingDataSource.Factory(baseFactory) { dataSpec ->
+            resolveVotifyUri(dataSpec)
+        }
+        val defaultFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(resolvingFactory)
+
+        val mediaSourceFactory = object : androidx.media3.exoplayer.source.MediaSource.Factory {
+            override fun setDrmSessionManagerProvider(drmSessionManagerProvider: androidx.media3.exoplayer.drm.DrmSessionManagerProvider) = apply {
+                defaultFactory.setDrmSessionManagerProvider(drmSessionManagerProvider)
+            }
+
+            override fun setLoadErrorHandlingPolicy(loadErrorHandlingPolicy: androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy) = apply {
+                defaultFactory.setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
+            }
+
+            override fun getSupportedTypes(): IntArray = defaultFactory.supportedTypes
+
+            override fun createMediaSource(mediaItem: androidx.media3.common.MediaItem): androidx.media3.exoplayer.source.MediaSource {
+                val uri = mediaItem.localConfiguration?.uri
+                if (uri != null && uri.scheme == "votify") {
+                    val trackId = Uri.decode(uri.pathSegments.firstOrNull().orEmpty())
+                    if (trackId.isNotEmpty()) {
+                        val resolvedUrl = runCatching {
+                            VotifyApp.instance.music.resolveStreamUrlSync(trackId)
+                        }.getOrNull()
+
+                        if (!resolvedUrl.isNullOrBlank()) {
+                            val isHls = resolvedUrl.contains(".m3u8") ||
+                                    resolvedUrl.contains("/hls") ||
+                                    trackId.startsWith("sc_") ||
+                                    trackId.contains("soundcloud.com")
+
+                            val builder = mediaItem.buildUpon()
+                                .setUri(Uri.parse(resolvedUrl))
+
+                            if (isHls) {
+                                builder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+                            }
+                            return defaultFactory.createMediaSource(builder.build())
+                        }
+                    }
+                }
+                return defaultFactory.createMediaSource(mediaItem)
+            }
+        }
+
+        val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build(),
+                /* handleAudioFocus = */ true,
+            )
+            .setHandleAudioBecomingNoisy(true) // pause when headphones are unplugged
+            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .build()
+
+        player.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                AudioEffectsManager.onAudioSessionIdChanged(audioSessionId)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // Пауза вместо приглушения при уведомлении/звонке: когда фокус теряется,
+                // ExoPlayer сам решает duck/pause по willPauseWhenDucked.
+                if (playbackState == Player.STATE_READY) applyPendingAudioPrefs()
+            }
+        })
+        AudioEffectsManager.attachPlayer(player)
+        instancePlayer = player
+        applyPendingAudioPrefs()
+
+        val openApp = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        session = MediaSession.Builder(this, player)
+            .setSessionActivity(openApp)
+            // Without a BitmapLoader the notification (and OEM «islands»: OriginOS, HyperOS,
+            // Honor capsule, Android 16 Live Updates) shows no album art — the default loader
+            // cannot fetch http URLs. Coil gives us caching for free.
+            .setBitmapLoader(CoilBitmapLoader())
+            .build()
+    }
+
+    /**
+     * Loads artwork for the MediaStyle notification via the app's Coil ImageLoader
+     * (HTTP covers, local files; software bitmaps only — hardware bitmaps crash RemoteViews).
+     */
+    @UnstableApi
+    private class CoilBitmapLoader : androidx.media3.common.util.BitmapLoader {
+
+        override fun supportsMimeType(mimeType: String): Boolean = true
+
+        override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> {
+            val future = SettableFuture.create<Bitmap>()
+            runCatching {
+                BitmapFactory.decodeByteArray(data, 0, data.size)
+            }.onSuccess { bmp ->
+                if (bmp != null) future.set(bmp) else future.setException(IllegalArgumentException("bad bitmap"))
+            }.onFailure { future.setException(it as Exception) }
+            return future
+        }
+
+        override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
+            val future = SettableFuture.create<Bitmap>()
+            VotifyApp.instance.appScope.launch {
+                runCatching {
+                    val request = coil.request.ImageRequest.Builder(VotifyApp.instance)
+                        .data(uri)
+                        .size(512)
+                        .allowHardware(false)
+                        .build()
+                    coil.Coil.imageLoader(VotifyApp.instance).execute(request)
+                        .drawable?.toBitmap()
+                }.onSuccess { bmp ->
+                    if (bmp != null) future.set(bmp) else future.setException(IllegalStateException("no drawable"))
+                }.onFailure { future.setException(it as Exception) }
+            }
+            return future
+        }
+    }
+
+    /**
+     * `votify://stream/<encoded id>` → the real URL. Runs on ExoPlayer's loading thread and is
+     * allowed to block (embedded mode performs a YouTube extraction here, cached by the repo).
+     */
+    @UnstableApi
+    private fun resolveVotifyUri(dataSpec: DataSpec): DataSpec {
+        val uri = dataSpec.uri
+        if (uri.scheme != "votify") return dataSpec
+        val trackId = Uri.decode(uri.pathSegments.firstOrNull().orEmpty())
+        if (trackId.isEmpty()) return dataSpec
+        val resolved = VotifyApp.instance.music.resolveStreamUrlSync(trackId)
+        return dataSpec.withUri(Uri.parse(resolved))
+    }
+
+    private var session: MediaSession? = null
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // App swiped away from recents: stop if nothing is playing.
+        val player = session?.player
+        if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
+            stopSelf()
+        }
+    }
+
+    override fun onDestroy() {
+        AudioEffectsManager.detachPlayer()
+        instancePlayer = null
+        session?.run {
+            player.release()
+            release()
+            session = null
+        }
+        super.onDestroy()
+    }
+
+    companion object {
+        /** Живой плеер сервиса: нужен, чтобы применять настройки, недоступные через контроллер. */
+        private var instancePlayer: ExoPlayer? = null
+
+        private var gapless: Boolean = true
+        private var normalization: Boolean = false
+        private var pauseOnDuck: Boolean = false
+
+        /**
+         * Применяет настройки аудио, которые не пробрасываются через MediaController:
+         * безшовность (точная стыковка треков), нормализация (пропуск тишины)
+         * и пауза вместо приглушения при потере аудиофокуса.
+         */
+        fun applyAudioPrefs(gapless: Boolean, normalization: Boolean, pauseOnDuck: Boolean) {
+            this.gapless = gapless
+            this.normalization = normalization
+            this.pauseOnDuck = pauseOnDuck
+            applyPendingAudioPrefs()
+        }
+
+        private fun applyPendingAudioPrefs() {
+            val p = instancePlayer ?: return
+            // ВАЖНО: setPauseAtEndOfMediaItems здесь НЕ вызывается. Он останавливает
+            // воспроизведение в конце каждого трека — именно из-за такого вызова очередь
+            // обрывалась бы после первого трека. Безшовную стыковку ExoPlayer делает
+            // сам по умолчанию.
+            runCatching { p.skipSilenceEnabled = normalization }
+            // Нормализация громкости — отдельным аудио-эффектом.
+            runCatching { AudioEffectsManager.setNormalization(normalization) }
+            // Примечание: режим duck/pause («При уведомлении») задаётся только при
+            // СОЗДАНИИ плеера (setAudioAttributes в onCreate) — Media3 не даёт менять
+            // willPauseWhenDucked на лету. Поэтому значение читается при старте сервиса.
+        }
+    }
+}

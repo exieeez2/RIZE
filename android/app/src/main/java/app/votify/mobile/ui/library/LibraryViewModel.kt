@@ -1,0 +1,325 @@
+package app.votify.mobile.ui.library
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import java.io.File
+import androidx.annotation.StringRes
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import app.votify.mobile.R
+import app.votify.mobile.VotifyApp
+import app.votify.mobile.data.DownloadProgress
+import app.votify.mobile.data.DownloadService
+import app.votify.mobile.data.LibraryRepository
+import app.votify.mobile.data.Track
+import app.votify.mobile.data.local.PlaylistEntity
+import app.votify.mobile.data.local.PlaylistSummary
+import app.votify.mobile.player.PlayerController
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** A snackbar message that is resolved to text inside composition. */
+data class UiMessage(@StringRes val id: Int, val args: List<Any> = emptyList())
+
+/** Which "⋮" menu is open and where it was opened from (affects the available actions). */
+data class TrackMenu(val track: Track, val playlistId: Long? = null, val downloaded: Boolean = false)
+
+/**
+ * Shared by every screen that shows tracks: favorites / history / playlists state plus the
+ * global bottom sheets (track menu, playlist picker, queue) and snackbar messages.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+class LibraryViewModel(
+    private val library: LibraryRepository,
+    private val player: PlayerController,
+    private val music: app.votify.mobile.data.MusicRepository,
+    private val context: android.content.Context? = null,
+    private val settings: app.votify.mobile.data.SettingsRepository? = null,
+) : ViewModel() {
+
+    private fun <T> stream(flow: Flow<T>, initial: T): StateFlow<T> =
+        flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initial)
+
+    val favorites: StateFlow<List<Track>> = stream(library.favorites, emptyList())
+    val favoriteIds: StateFlow<Set<String>> = stream(library.favoriteIds, emptySet())
+    val recent: StateFlow<List<Track>> = stream(library.recent(limit = 200), emptyList())
+    val historyCount: StateFlow<Int> = stream(library.historyCount, 0)
+    val playlists: StateFlow<List<PlaylistSummary>> = stream(library.playlists, emptyList())
+    val followedArtists: StateFlow<List<app.votify.mobile.data.FollowedArtist>> = library.followedArtists
+
+    // ---- Offline downloads ----
+
+    /** Live download progress (trackId → progress) for per-row progress bars. */
+    val downloadProgress: StateFlow<Map<String, DownloadProgress>> = music.downloadProgress
+
+    /** Ids with an offline copy — drives the «скачано» badge on track rows. */
+    val downloadedIds: StateFlow<Set<String>> = music.downloadedIds
+
+    /** All tracks stored locally on device for offline playback. */
+    val downloadedTracks: StateFlow<List<Track>> = downloadedIds
+        .flatMapLatest { ids ->
+            if (ids.isEmpty()) flowOf(emptyList())
+            else library.tracksByIds(ids.toList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    init {
+        // Resolve missing photos for followed artists from Deezer
+        viewModelScope.launch(Dispatchers.IO) {
+            library.followedArtists.collect { list ->
+                list.filter { it.photoUrl.isBlank() }.forEach { artist ->
+                    runCatching {
+                        val deezer = app.votify.mobile.data.DeezerApi.getArtistByName(artist.name)
+                        val pic = deezer?.let { d ->
+                            if (d.pictureBig.isNotBlank()) d.pictureBig
+                            else if (d.pictureXl.isNotBlank()) d.pictureXl
+                            else d.picture
+                        }.orEmpty()
+                        if (pic.isNotBlank()) {
+                            library.updateArtistPhoto(artist.name, pic)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Seed the «скачано» badges: scan the offline storage for everything the
+        // library currently knows about (favorites + history + all playlists).
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!music.isServerMode) {
+                runCatching {
+                    val ids = buildSet {
+                        library.favorites.first().let { addAll(it.map { t -> t.id }) }
+                        library.recent(limit = 300).first().let { addAll(it.map { t -> t.id }) }
+                        library.playlists.first().forEach { p ->
+                            library.playlistTracks(p.id).first().let { addAll(it.map { t -> t.id }) }
+                        }
+                    }
+                    music.seedDownloaded(ids.filter { music.isDownloaded(it) }.toSet())
+                }
+            }
+        }
+    }
+
+    // ---- Playlist detail ----
+
+    private val openedPlaylistId = MutableStateFlow<Long?>(null)
+
+    val openedPlaylist: StateFlow<PlaylistEntity?> = stream(
+        openedPlaylistId.flatMapLatest { id -> if (id == null) flowOf<PlaylistEntity?>(null) else library.playlist(id) },
+        null,
+    )
+    val openedPlaylistTracks: StateFlow<List<Track>> = stream(
+        openedPlaylistId.flatMapLatest { id -> if (id == null) flowOf<List<Track>>(emptyList()) else library.playlistTracks(id) },
+        emptyList(),
+    )
+
+    fun openPlaylist(id: Long) {
+        openedPlaylistId.value = id
+    }
+
+    // ---- Sheets ----
+
+    private val _menu = MutableStateFlow<TrackMenu?>(null)
+    val menu: StateFlow<TrackMenu?> = _menu
+
+    private val _playlistPicker = MutableStateFlow<Track?>(null)
+    val playlistPicker: StateFlow<Track?> = _playlistPicker
+
+    private val _queueOpen = MutableStateFlow(false)
+    val queueOpen: StateFlow<Boolean> = _queueOpen
+
+    private val _messages = MutableSharedFlow<UiMessage>(extraBufferCapacity = 8)
+    val messages: SharedFlow<UiMessage> = _messages
+
+    fun openMenu(track: Track, playlistId: Long? = null) {
+        _menu.value = TrackMenu(track, playlistId, music.isDownloaded(track.id))
+    }
+
+    fun closeMenu() {
+        _menu.value = null
+    }
+
+    /** Download one track for offline listening (menu action), reporting live progress. */
+    fun downloadTrack(track: Track) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (music.isServerMode) {
+                _messages.tryEmit(UiMessage(R.string.toast_download_server))
+                return@launch
+            }
+            _messages.tryEmit(UiMessage(R.string.toast_download_started))
+            val ok = music.downloadTrackTracked(track.id)
+            if (ok && context != null && settings != null) {
+                try {
+                    val cp = app.votify.mobile.data.parseCustomPrefs(settings.settings.first().customPrefs)
+                    if (cp.exportToDownloads) {
+                        music.exportTrack(
+                            context = context,
+                            trackId = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            format = cp.downloadFormat,
+                        )
+                    }
+                } catch (_: Throwable) {}
+            }
+            _messages.tryEmit(
+                UiMessage(if (ok) R.string.toast_download_track_done else R.string.toast_download_track_failed, listOf(track.title)),
+            )
+        }
+    }
+
+    /** Remove a track's offline copy. */
+    fun removeDownload(track: Track) {
+        viewModelScope.launch(Dispatchers.IO) {
+            music.deleteDownload(track.id)
+            _messages.tryEmit(UiMessage(R.string.toast_download_removed))
+        }
+    }
+
+    /**
+     * Download a whole playlist sequentially in [DownloadService]: one notification shows
+     * «трек N из M — P%», and every row still gets its own progress bar from [downloadProgress].
+     */
+    fun downloadPlaylist(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        if (music.isServerMode) {
+            _messages.tryEmit(UiMessage(R.string.toast_download_server))
+            return
+        }
+        val notDownloaded = tracks.filter { it.id !in downloadedIds.value }
+        if (notDownloaded.isEmpty()) return
+        DownloadService.startPlaylist(VotifyApp.instance, notDownloaded.map { it.id }, notDownloaded.map { it.title })
+        _messages.tryEmit(UiMessage(R.string.toast_download_started))
+    }
+
+    fun openPlaylistPicker(track: Track) {
+        _menu.value = null
+        _playlistPicker.value = track
+    }
+
+    fun closePlaylistPicker() {
+        _playlistPicker.value = null
+    }
+
+    fun openQueue() {
+        _queueOpen.value = true
+    }
+
+    fun closeQueue() {
+        _queueOpen.value = false
+    }
+
+    // ---- Actions ----
+
+    fun toggleFavorite(track: Track) {
+        viewModelScope.launch {
+            val nowFavorite = library.toggleFavorite(track)
+            _messages.tryEmit(UiMessage(if (nowFavorite) R.string.toast_favorite_added else R.string.toast_favorite_removed))
+        }
+    }
+
+    fun playNext(track: Track) {
+        player.playNext(track)
+        _messages.tryEmit(UiMessage(R.string.toast_play_next))
+    }
+
+    fun addToQueue(tracks: List<Track>) {
+        player.enqueue(tracks)
+        _messages.tryEmit(UiMessage(R.string.toast_added_to_queue))
+    }
+
+    fun createPlaylist(name: String, thenAdd: Track? = null) {
+        viewModelScope.launch {
+            val id = library.createPlaylist(name)
+            if (thenAdd != null) addToPlaylist(id, thenAdd)
+        }
+    }
+
+    fun addToPlaylist(playlistId: Long, track: Track) {
+        viewModelScope.launch {
+            val added = library.addToPlaylist(playlistId, track)
+            val name = library.playlists.first().firstOrNull { it.id == playlistId }?.name ?: ""
+            _messages.tryEmit(UiMessage(if (added) R.string.toast_added_to_playlist else R.string.toast_already_in_playlist, listOf(name)))
+            _playlistPicker.value = null
+        }
+    }
+
+    fun removeFromPlaylist(playlistId: Long, trackId: String) {
+        viewModelScope.launch { library.removeFromPlaylist(playlistId, trackId) }
+    }
+
+    fun renamePlaylist(id: Long, name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch { library.renamePlaylist(id, name) }
+    }
+
+    fun deletePlaylist(id: Long) {
+        viewModelScope.launch { library.deletePlaylist(id) }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch { library.clearHistory() }
+    }
+
+    fun setPlaylistCover(id: Long, uri: Uri) {
+        viewModelScope.launch {
+            val filePath = withContext(Dispatchers.IO) {
+                runCatching {
+                    VotifyApp.instance.contentResolver.openInputStream(uri)?.use { input ->
+                        val bmp = BitmapFactory.decodeStream(input) ?: return@runCatching null
+                        val maxDim = 512
+                        val scale = minOf(1f, maxDim / bmp.width.toFloat(), maxDim / bmp.height.toFloat())
+                        val scaled = if (scale < 1f) {
+                            Bitmap.createScaledBitmap(
+                                bmp,
+                                (bmp.width * scale).toInt().coerceAtLeast(1),
+                                (bmp.height * scale).toInt().coerceAtLeast(1),
+                                true,
+                            )
+                        } else bmp
+                        val dir = File(VotifyApp.instance.filesDir, "playlist_covers").apply { mkdirs() }
+                        dir.listFiles { _, name -> name.startsWith("pl_${id}_") || name == "pl_${id}.jpg" }?.forEach { it.delete() }
+                        val file = File(dir, "pl_${id}_${System.currentTimeMillis()}.jpg")
+                        file.outputStream().use { out ->
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                        }
+                        file.absolutePath
+                    }
+                }.getOrNull()
+            }
+            if (filePath != null) {
+                library.updatePlaylistCover(id, filePath)
+                _messages.tryEmit(UiMessage(R.string.toast_cover_updated))
+            }
+        }
+    }
+
+    fun removePlaylistCover(id: Long) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val dir = File(VotifyApp.instance.filesDir, "playlist_covers")
+                    dir.listFiles { _, name -> name.startsWith("pl_${id}_") || name == "pl_${id}.jpg" }?.forEach { it.delete() }
+                }
+            }
+            library.updatePlaylistCover(id, null)
+            _messages.tryEmit(UiMessage(R.string.toast_cover_removed))
+        }
+    }
+
+    fun skipToQueueItem(index: Int) = player.skipToQueueItem(index)
+}

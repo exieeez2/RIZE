@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Тег релиза (например v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows: установщик .exe (NSIS)
+          - os: windows-latest
+            args: '--win nsis --x64'
+          # Linux: AppImage + .deb
+          - os: ubuntu-latest
+            args: '--linux AppImage deb --x64'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # Firebase Web Config (секрет репозитория) кладётся в firebase-config.json
+      # до упаковки, чтобы в собранном приложении работал вход в аккаунт.
+      - name: Prepare Firebase config
+        run: node scripts/prepare-firebase-config.js
+        env:
+          VOTIFY_FIREBASE_CONFIG: ${{ secrets.VOTIFY_FIREBASE_CONFIG }}
+
+      # Кэш electron и инструментов electron-builder: без него каждый прогон тянет
+      # сотни мегабайт с GitHub и иногда ловит лимит «too many requests».
+      - name: Cache electron and builder tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
+      - name: Build
+        id: build
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npx electron-builder ${{ matrix.args }} --publish never 2>&1 | tee build.log
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+
+      # Второй заход: если первый упал на скачивании инструментов (сетевой сбой или
+      # лимит GitHub) — повтор обычно проходит.
+      - name: Build (повтор)
+        id: build2
+        if: steps.build.outcome == 'failure'
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npx electron-builder ${{ matrix.args }} --publish never 2>&1 | tee -a build.log
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+
+      # Хвост лога ошибки выводим аннотациями: их читает API, даже когда сами логи
+      # раннера недоступны.
+      - name: Show build log
+        if: steps.build.outcome == 'failure'
+        shell: bash
+        run: |
+          tail -40 build.log | tail -25 | while IFS= read -r line; do
+            [ -n "$line" ] && echo "::error::$line"
+          done
+          true
+
+      - name: Fail if build failed
+        if: steps.build.outcome == 'failure' && steps.build2.outcome != 'success'
+        shell: bash
+        run: |
+          ls -la dist 2>/dev/null | head -20
+          exit 1
+
+      # Что попало в пакет — видно аннотациями (логи раннера читаются не всегда).
+      - name: Diagnostics
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "OS: ${{ runner.os }} | args: ${{ matrix.args }}"
+            echo "dist:"; du -sh dist 2>/dev/null || true
+            echo "готовые файлы:"; ls -la dist 2>/dev/null | tail -12 || true
+            echo "bin:"; ls -la bin 2>/dev/null | tail -5 || true
+            echo "node_modules: $(ls node_modules 2>/dev/null | wc -l) пакетов"
+            echo "firebase: $(du -sh node_modules/firebase 2>/dev/null | cut -f1)"
+          } | while IFS= read -r line; do
+            [ -n "$line" ] && echo "::notice::$line"
+          done
+          true
+
+      # Скрипт установки и иконка едут вместе с релизом: по ним работает команда
+      #   curl -fsSL .../releases/latest/download/install.sh | bash
+      - name: Copy installer assets (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cp src/icons/icon-512.png dist/rize-icon.png
+          cp src/icons/icon-512.png dist/votify-icon.png
+          cp scripts/install.sh dist/install.sh
+
+      - name: Publish Windows assets
+        if: runner.os == 'Windows'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version || github.ref_name }}
+          name: RIZE ${{ inputs.version || github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Linux assets
+        if: runner.os == 'Linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version || github.ref_name }}
+          name: RIZE ${{ inputs.version || github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/install.sh
+            dist/rize-icon.png
+            dist/votify-icon.png
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

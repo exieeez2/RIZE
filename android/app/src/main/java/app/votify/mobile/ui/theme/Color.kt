@@ -1,0 +1,436 @@
+package app.votify.mobile.ui.theme
+
+import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+
+/**
+ * Votify palette — see design/DESIGN-monochrome.md.
+ * Strictly achromatic: depth comes from tonal steps + hairline borders, never shadows.
+ */
+data class VotifyPalette(
+    val isDark: Boolean,
+    val pitchBlack: Color,
+    val surfaceBase: Color,
+    val surfaceContainerLowest: Color,
+    val surfaceContainerLow: Color,
+    val surfaceContainer: Color,
+    val surfaceContainerHigh: Color,
+    val surfaceContainerHighest: Color,
+    val surfaceBright: Color,
+    val borderSubtle: Color,
+    val borderProminent: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val textMuted: Color,
+    val primary: Color,
+    val onPrimary: Color,
+    val primaryContainer: Color,
+    val onPrimaryContainer: Color,
+    val secondary: Color,
+    val onSecondary: Color,
+    val secondaryContainer: Color,
+    val onSecondaryContainer: Color,
+    val outline: Color,
+    val outlineVariant: Color,
+    val error: Color,
+    val onError: Color,
+    val errorContainer: Color,
+    val onErrorContainer: Color,
+    val inverseSurface: Color,
+    val inverseOnSurface: Color,
+)
+
+/** "OLED Black" — pure pitch black for AMOLED displays with zero gray background tint. */
+val OledBlackPalette = VotifyPalette(
+    isDark = true,
+    pitchBlack = Color(0xFF000000),
+    surfaceBase = Color(0xFF000000),
+    surfaceContainerLowest = Color(0xFF000000),
+    surfaceContainerLow = Color(0xFF0A0A0C),
+    surfaceContainer = Color(0xFF111114),
+    surfaceContainerHigh = Color(0xFF19191D),
+    surfaceContainerHighest = Color(0xFF222227),
+    surfaceBright = Color(0xFF2C2C33),
+    borderSubtle = Color(0xFF18181C),
+    borderProminent = Color(0xFF2C2C32),
+    textPrimary = Color(0xFFFFFFFF),
+    textSecondary = Color(0xFFE5E5EA),
+    textMuted = Color(0xFF8E8E93),
+    primary = Color(0xFFFFFFFF),
+    onPrimary = Color(0xFF000000),
+    primaryContainer = Color(0xFF222227),
+    onPrimaryContainer = Color(0xFFFFFFFF),
+    secondary = Color(0xFFC6C6CB),
+    onSecondary = Color(0xFF2F3034),
+    secondaryContainer = Color(0xFF2C2C32),
+    onSecondaryContainer = Color(0xFFB5B4BA),
+    outline = Color(0xFF8E9192),
+    outlineVariant = Color(0xFF2A2A2E),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+    errorContainer = Color(0xFF93000A),
+    onErrorContainer = Color(0xFFFFDAD6),
+    inverseSurface = Color(0xFFE5E2E1),
+    inverseOnSurface = Color(0xFF313030),
+)
+
+/** Accent themes: the OLED dark hierarchy with a colored primary (play buttons, chips, slider). */
+private fun accentPalette(primary: Color, onPrimary: Color, container: Color): VotifyPalette =
+    OledBlackPalette.copy(
+        primary = primary,
+        onPrimary = onPrimary,
+        primaryContainer = container,
+        onPrimaryContainer = primary,
+        secondary = primary,
+        secondaryContainer = container,
+    )
+
+val VioletPalette = accentPalette(Color(0xFFA78BFA), Color(0xFF151024), Color(0xFF322A4D))
+val AzurePalette = accentPalette(Color(0xFF6AA6FF), Color(0xFF0D1B2E), Color(0xFF27364B))
+val EmeraldPalette = accentPalette(Color(0xFF4CD7A0), Color(0xFF06231A), Color(0xFF1F3D33))
+val AmberPalette = accentPalette(Color(0xFFF5C044), Color(0xFF241B04), Color(0xFF3F3418))
+val RosePalette = accentPalette(Color(0xFFF9708B), Color(0xFF2A0912), Color(0xFF45242E))
+
+/** Читаемый цвет текста для фона: на светлом фоне — тёмный. */
+private fun textPrimaryFor(background: Color): Color =
+    if (background.red * 0.299f + background.green * 0.587f + background.blue * 0.114f > 0.55f) {
+        Color(0xFF101013)
+    } else {
+        Color(0xFFFFFFFF)
+    }
+
+/**
+ * Готовая ЦВЕТОВАЯ ПАРА: глубокий тёмный фон + яркий акцент.
+ * Оба цвета берутся из готового набора пар (см. [ColorPair]) — фон ложится на
+ * всю тёмную иерархию, акцент идёт в кнопки, выделения и иконки.
+ */
+private fun pairPalette(
+    background: Color,
+    accent: Color,
+    cards: Color = mixOf(background, Color.White, 0.06f),
+    focus: Color = mixOf(background, Color.White, 0.14f),
+    borders: Color = mixOf(background, Color.White, 0.12f),
+): VotifyPalette = OledBlackPalette.copy(
+    isDark = true,
+    pitchBlack = background,
+    surfaceBase = background,
+    surfaceContainerLowest = mixOf(background, Color.Black, 0.25f),
+    surfaceContainerLow = cards,
+    surfaceContainer = cards,
+    surfaceContainerHigh = focus,
+    surfaceContainerHighest = mixOf(focus, Color.White, 0.10f),
+    surfaceBright = mixOf(focus, Color.White, 0.16f),
+    borderSubtle = borders,
+    borderProminent = mixOf(accent, Color.White, 0.25f),
+    textPrimary = textPrimaryFor(background),
+    textSecondary = mixOf(textPrimaryFor(background), background, 0.22f),
+    textMuted = mixOf(textPrimaryFor(background), background, 0.52f),
+    primary = accent,
+    onPrimary = onColorFor(accent),
+    primaryContainer = mixOf(background, accent, 0.30f),
+    onPrimaryContainer = accent,
+    secondary = accent,
+    onSecondary = onColorFor(accent),
+    secondaryContainer = mixOf(background, accent, 0.24f),
+    onSecondaryContainer = accent,
+)
+
+/**
+ * Готовые цветовые пары «фон + акцент» (Настройки → Интерфейс).
+ * Порядок соответствует тому, как они показываются пользователю.
+ */
+enum class ColorPair(
+    val key: String,
+    val titleRu: String,
+    val backgroundHex: String,
+    val accentHex: String,
+) {
+    DeepPurple("pair_deep_purple", "Фиолетовый", "#32104F", "#FF3CAC"),
+    DarkIndigo("pair_dark_indigo", "Тёмный индиго", "#19152F", "#A5E7FF"),
+    // У этой пары цвета идут наоборот (сначала светлый): тёмный делаем фоном,
+    // иначе белый текст на кремовом не читался бы.
+    MilkCream("pair_milk_cream", "Молочный / бордо", "#701C32", "#F1E9D8"),
+    DeepBlack("pair_deep_black", "Чёрный", "#080808", "#BFC3C7"),
+    DarkForest("pair_dark_forest", "Тёмно-зелёный", "#123B2A", "#E5FF00"),
+    Graphite("pair_graphite", "Графитовый", "#292929", "#C88E9B"),
+    ElectricBlue("pair_electric_blue", "Электрический синий", "#101A46", "#245BFF"),
+    JetBlack("pair_jet_black", "Чёрный (алый)", "#080808", "#C1121F"),
+    Obsidian("pair_obsidian", "Обсидиан", "#0A0A0A", "#B6FF00"),
+    Espresso("pair_espresso", "Тёмный кофе", "#24150F", "#D96B27"),
+    ;
+
+    val background: Color get() = Color(android.graphics.Color.parseColor(backgroundHex))
+    val accent: Color get() = Color(android.graphics.Color.parseColor(accentHex))
+
+    /** Localized display name resource for this pair (RU default + EN overlay). */
+    @StringRes
+    fun titleRes(): Int = when (this) {
+        DeepPurple -> app.votify.mobile.R.string.pair_deep_purple
+        DarkIndigo -> app.votify.mobile.R.string.pair_dark_indigo
+        MilkCream -> app.votify.mobile.R.string.pair_milk_cream
+        DeepBlack -> app.votify.mobile.R.string.pair_deep_black
+        DarkForest -> app.votify.mobile.R.string.pair_dark_forest
+        Graphite -> app.votify.mobile.R.string.pair_graphite
+        ElectricBlue -> app.votify.mobile.R.string.pair_electric_blue
+        JetBlack -> app.votify.mobile.R.string.pair_jet_black
+        Obsidian -> app.votify.mobile.R.string.pair_obsidian
+        Espresso -> app.votify.mobile.R.string.pair_espresso
+    }
+
+    /** Палитра этой пары. */
+    fun toPalette(): VotifyPalette = pairPalette(background = background, accent = accent)
+
+    /** Цвет текста, читаемый на фоне пары: на светлом фоне — тёмный. */
+    private val textHex: String
+        get() = if (background.red * 0.299f + background.green * 0.587f + background.blue * 0.114f > 0.55f) {
+            "#101013"
+        } else {
+            "#FFFFFF"
+        }
+
+    /** Свежая тема-спек этой пары (для ручного редактирования цветов). */
+    fun toSpec(): WorkshopThemeSpec = WorkshopThemeSpec(
+        primary = accentHex,
+        background = backgroundHex,
+        text = textHex,
+        cards = hexOf(mixOf(background, Color.White, 0.06f)),
+        borders = hexOf(mixOf(background, Color.White, 0.12f)),
+        focus = hexOf(mixOf(background, Color.White, 0.14f)),
+        mode = "dark",
+    )
+
+    /**
+     * Слоты для `setCustomColors`: только те ключи, которые он понимает.
+     * Благодаря этому пара применяется через уже существующий механизм цветов,
+     * а не требует отдельного API.
+     */
+    fun toSlotMap(): Map<String, String> = mapOf(
+        "primary" to accentHex,
+        "background" to backgroundHex,
+        "text" to textHex,
+        "cards" to hexOf(mixOf(background, Color.White, 0.06f)),
+        "borders" to hexOf(mixOf(background, Color.White, 0.12f)),
+    )
+
+    companion object {
+        fun fromKey(key: String?): ColorPair? = entries.firstOrNull { it.key == key }
+    }
+}
+
+/** Цвет → строка #RRGGBB (для спеков и превью). */
+internal fun hexOf(c: Color): String =
+    "#%02X%02X%02X".format(
+        (c.red * 255f).toInt().coerceIn(0, 255),
+        (c.green * 255f).toInt().coerceIn(0, 255),
+        (c.blue * 255f).toInt().coerceIn(0, 255),
+    )
+
+/** "Графит" — same hierarchy, lifted one tonal step so nothing is pure black. */
+val GraphitePalette = OledBlackPalette.copy(
+    pitchBlack = Color(0xFF0F0F10),
+    surfaceBase = Color(0xFF1A1A1C),
+    surfaceContainerLowest = Color(0xFF151517),
+    surfaceContainerLow = Color(0xFF202023),
+    surfaceContainer = Color(0xFF242427),
+    surfaceContainerHigh = Color(0xFF2F2F33),
+    surfaceContainerHighest = Color(0xFF3B3B40),
+    surfaceBright = Color(0xFF454549),
+    borderSubtle = Color(0xFF2F2F33),
+    borderProminent = Color(0xFF4E4E54),
+    textMuted = Color(0xFF9A9AA0),
+)
+
+/** Light counterpart with pure, beautiful white pages, high contrast and clean typography. */
+val LightPalette = VotifyPalette(
+    isDark = false,
+    pitchBlack = Color(0xFFFFFFFF),
+    surfaceBase = Color(0xFFFFFFFF),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF7F8FA),
+    surfaceContainer = Color(0xFFEFF1F4),
+    surfaceContainerHigh = Color(0xFFE4E7EB),
+    surfaceContainerHighest = Color(0xFFD8DCE2),
+    surfaceBright = Color(0xFFFFFFFF),
+    borderSubtle = Color(0xFFE5E8EC),
+    borderProminent = Color(0xFFCBD0D7),
+    textPrimary = Color(0xFF111215),
+    textSecondary = Color(0xFF33363D),
+    textMuted = Color(0xFF6B7280),
+    primary = Color(0xFF111215),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFE4E7EB),
+    onPrimaryContainer = Color(0xFF111215),
+    secondary = Color(0xFF4B5563),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFE4E7EB),
+    onSecondaryContainer = Color(0xFF1F2937),
+    outline = Color(0xFF9CA3AF),
+    outlineVariant = Color(0xFFD1D5DB),
+    error = Color(0xFFDC2626),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFEE2E2),
+    onErrorContainer = Color(0xFF991B1B),
+    inverseSurface = Color(0xFF1F2937),
+    inverseOnSurface = Color(0xFFF9FAFB),
+)
+
+val LocalVotifyPalette = staticCompositionLocalOf { OledBlackPalette }
+
+// ---------------------------------------------------------------------------
+// Акцентные заливки
+// ---------------------------------------------------------------------------
+
+private fun channelMix(a: Float, b: Float, t: Float): Float = a + (b - a) * t
+
+/** Простая примесь в sRGB: для приглушённых подложек точность цветопередачи не важна. */
+private fun mixOf(a: Color, b: Color, t: Float): Color = Color(
+    red = channelMix(a.red, b.red, t),
+    green = channelMix(a.green, b.green, t),
+    blue = channelMix(a.blue, b.blue, t),
+    alpha = 1f,
+)
+
+/** Насыщенность: 0 для белого/серого/чёрного, заметно больше 0 для цветного акцента. */
+private val Color.chroma: Float get() = maxOf(red, green, blue) - minOf(red, green, blue)
+
+private fun Color.brightness(): Float = red * 0.299f + green * 0.587f + blue * 0.114f
+
+/**
+ * Theme-aware color accessors. Keeps the `VotifyColors.TextMuted` call-sites that were written
+ * against the original static palette, but now resolves against the active theme.
+ */
+object VotifyColors {
+    private val p: VotifyPalette
+        @Composable @ReadOnlyComposable get() = LocalVotifyPalette.current
+
+    val PitchBlack: Color @Composable @ReadOnlyComposable get() = p.pitchBlack
+    val SurfaceBase: Color @Composable @ReadOnlyComposable get() = p.surfaceBase
+    val SurfaceContainerLowest: Color @Composable @ReadOnlyComposable get() = p.surfaceContainerLowest
+    val SurfaceContainerLow: Color @Composable @ReadOnlyComposable get() = p.surfaceContainerLow
+    val SurfaceContainer: Color @Composable @ReadOnlyComposable get() = p.surfaceContainer
+    val SurfaceContainerHigh: Color @Composable @ReadOnlyComposable get() = p.surfaceContainerHigh
+    val SurfaceContainerHighest: Color @Composable @ReadOnlyComposable get() = p.surfaceContainerHighest
+    val SurfaceBright: Color @Composable @ReadOnlyComposable get() = p.surfaceBright
+    val BorderSubtle: Color @Composable @ReadOnlyComposable get() = p.borderSubtle
+    val BorderProminent: Color @Composable @ReadOnlyComposable get() = p.borderProminent
+    val TextPrimary: Color @Composable @ReadOnlyComposable get() = p.textPrimary
+    val TextSecondary: Color @Composable @ReadOnlyComposable get() = p.textSecondary
+    val TextMuted: Color @Composable @ReadOnlyComposable get() = p.textMuted
+    val Primary: Color @Composable @ReadOnlyComposable get() = p.primary
+
+    /**
+     * Акцент для ИКОНОК и активных элементов (выбранная вкладка, активный чип).
+     * На монохромных темах (OLED/графит) остаётся прежний белый, чтобы привычный
+     * вид не изменился, — а на цветных темах и цветовых парах берёт акцент.
+     */
+    val IconAccent: Color
+        @Composable @ReadOnlyComposable get() {
+            val primary = p.primary
+            return if (primary.chroma < 0.06f) p.textPrimary else primary
+        }
+    val OnPrimary: Color @Composable @ReadOnlyComposable get() = p.onPrimary
+
+    /**
+     * Заливка крупной круглой кнопки-акцента. Монохромные темы (OLED/графит/светлая) дают
+     * белый или тёмный диск, как в исходном дизайне. Цветной акцент раньше сильно
+     * приглушался (30 %) и выглядел грязным — теперь берём более чистый его оттенок.
+     */
+    val AccentFill: Color
+        @Composable @ReadOnlyComposable get() {
+            val primary = p.primary
+            return if (primary.chroma < 0.06f) p.textPrimary else mixOf(p.surfaceBase, primary, 0.55f)
+        }
+
+    /** Иконка внутри [AccentFill]: сам акцент, осветлённый, если он слишком тёмный. */
+    val AccentContent: Color
+        @Composable @ReadOnlyComposable get() {
+            val primary = p.primary
+            if (primary.chroma < 0.06f) return p.surfaceBase
+            return if (primary.brightness() < 0.35f) mixOf(primary, Color.White, 0.45f) else primary
+        }
+    val PrimaryContainer: Color @Composable @ReadOnlyComposable get() = p.primaryContainer
+    val OnPrimaryContainer: Color @Composable @ReadOnlyComposable get() = p.onPrimaryContainer
+    val Secondary: Color @Composable @ReadOnlyComposable get() = p.secondary
+    val OnSecondary: Color @Composable @ReadOnlyComposable get() = p.onSecondary
+    val SecondaryContainer: Color @Composable @ReadOnlyComposable get() = p.secondaryContainer
+    val OnSecondaryContainer: Color @Composable @ReadOnlyComposable get() = p.onSecondaryContainer
+    val Outline: Color @Composable @ReadOnlyComposable get() = p.outline
+    val OutlineVariant: Color @Composable @ReadOnlyComposable get() = p.outlineVariant
+    val Error: Color @Composable @ReadOnlyComposable get() = p.error
+    val OnError: Color @Composable @ReadOnlyComposable get() = p.onError
+    val ErrorContainer: Color @Composable @ReadOnlyComposable get() = p.errorContainer
+    val OnErrorContainer: Color @Composable @ReadOnlyComposable get() = p.onErrorContainer
+    val InverseSurface: Color @Composable @ReadOnlyComposable get() = p.inverseSurface
+    val InverseOnSurface: Color @Composable @ReadOnlyComposable get() = p.inverseOnSurface
+}
+
+// ---------------------------------------------------------------------------
+// Workshop themes (мастерская тем)
+// ---------------------------------------------------------------------------
+
+/** Subset of the PC workshop theme schema (firestore.rules) that mobile applies. */
+@kotlinx.serialization.Serializable
+data class WorkshopThemeSpec(
+    val primary: String = "#FFFFFF",
+    val background: String = "#121212",
+    val text: String = "#FFFFFF",
+    val cards: String = "#1E1E1E",
+    val borders: String = "#2A2A2A",
+    val focus: String = "#48484A",
+    val mode: String = "dark",
+    val backgroundPreset: String = "default",
+    val backgroundUrl: String = "",
+    val cornerRadius: Int = 16,
+    val uiTransparency: Int = 100,
+    val backgroundBlur: Int = 0,
+    val particles: String = "none",
+    val fontFamily: String = "inter",
+)
+
+private fun parseColorOrNull(hex: String): Color? = runCatching {
+    Color(android.graphics.Color.parseColor(hex.trim()))
+}.getOrNull()
+
+/** Contrast-safe foreground for an arbitrary accent (workshop themes). */
+private fun onColorFor(c: Color): Color =
+    if (c.red * 0.299 + c.green * 0.587 + c.blue * 0.114 > 0.55) Color(0xFF101013) else Color(0xFFFFFFFF)
+
+/** Maps a workshop theme onto the Votify palette; falls back to OLED Black on bad values. */
+fun WorkshopThemeSpec.toPalette(): VotifyPalette {
+    val bg = parseColorOrNull(background) ?: Color(0xFF121212)
+    val cards = parseColorOrNull(cards) ?: Color(0xFF1E1E1E)
+    val text = parseColorOrNull(text) ?: Color(0xFFFFFFFF)
+    val borders = parseColorOrNull(borders) ?: Color(0xFF2A2A2A)
+    val focus = parseColorOrNull(focus) ?: Color(0xFF48484A)
+    val accent = parseColorOrNull(primary) ?: Color(0xFFFFFFFF)
+    val light = mode == "light" || (mode == "system" && false)
+    val dark = !light
+    // Keep text readable over the author's background.
+    val textPrimary = if (dark && text == Color(0xFF000000)) Color(0xFFFFFFFF) else text
+    return OledBlackPalette.copy(
+        isDark = dark,
+        pitchBlack = bg,
+        surfaceBase = bg,
+        surfaceContainerLowest = bg,
+        surfaceContainerLow = cards,
+        surfaceContainer = cards,
+        surfaceContainerHigh = focus,
+        surfaceContainerHighest = focus,
+        surfaceBright = focus,
+        borderSubtle = borders,
+        borderProminent = focus,
+        textPrimary = textPrimary,
+        textSecondary = textPrimary.copy(alpha = 0.88f).compositeOver(bg),
+        textMuted = textPrimary.copy(alpha = 0.55f).compositeOver(bg),
+        primary = accent,
+        onPrimary = onColorFor(accent),
+        primaryContainer = accent.copy(alpha = 0.22f).compositeOver(bg),
+        onPrimaryContainer = accent,
+        secondary = accent,
+        secondaryContainer = accent.copy(alpha = 0.22f).compositeOver(bg),
+    )
+}

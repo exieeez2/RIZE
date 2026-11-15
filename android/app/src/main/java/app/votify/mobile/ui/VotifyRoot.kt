@@ -1,0 +1,1414 @@
+package app.votify.mobile.ui
+
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import app.votify.mobile.ui.common.UpdateBanner
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBarDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Scaffold
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import app.votify.mobile.ui.theme.LocalVotifyPalette
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.hazeChild
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import android.content.Intent
+import app.votify.mobile.R
+import app.votify.mobile.VotifyApp
+import app.votify.mobile.data.AudioQuality
+import app.votify.mobile.data.Settings
+import app.votify.mobile.data.AppTheme
+import app.votify.mobile.data.Track
+import app.votify.mobile.ui.account.AccountEvent
+import app.votify.mobile.ui.account.WelcomeOverlay
+import app.votify.mobile.ui.account.AccountScreen
+import app.votify.mobile.ui.account.FriendsScreen
+import app.votify.mobile.ui.account.FriendsViewModel
+import app.votify.mobile.ui.account.ProfileScreen
+import app.votify.mobile.ui.account.ProfileViewModel
+import app.votify.mobile.ui.account.UserScreen
+import app.votify.mobile.ui.account.AccountViewModel
+import app.votify.mobile.ui.artist.ArtistScreen
+import app.votify.mobile.ui.artist.ArtistViewModel
+import app.votify.mobile.ui.components.MiniPlayer
+import app.votify.mobile.ui.components.MiniStyle
+import app.votify.mobile.ui.components.PlaylistPickerSheet
+import app.votify.mobile.ui.components.QueueSheet
+import app.votify.mobile.ui.components.TrackMenuSheet
+import app.votify.mobile.ui.components.pressBounce
+import app.votify.mobile.ui.home.HomeScreen
+import app.votify.mobile.ui.home.HomeViewModel
+import app.votify.mobile.ui.library.DownloadedScreen
+import app.votify.mobile.ui.library.FavoritesScreen
+import app.votify.mobile.ui.library.HistoryScreen
+import app.votify.mobile.ui.library.ImportEvent
+import app.votify.mobile.ui.library.ImportScreen
+import app.votify.mobile.ui.library.ImportViewModel
+import app.votify.mobile.ui.library.LibraryScreen
+import app.votify.mobile.ui.library.LibraryViewModel
+import app.votify.mobile.ui.library.PlaylistScreen
+import app.votify.mobile.ui.player.PlayerScreen
+import app.votify.mobile.ui.player.PlayerVisuals
+import app.votify.mobile.ui.player.PlayerViewModel
+import app.votify.mobile.ui.search.SearchScreen
+import app.votify.mobile.ui.search.SearchViewModel
+import app.votify.mobile.ui.trending.TrendingScreen
+import app.votify.mobile.ui.trending.TrendingViewModel
+import app.votify.mobile.ui.workshop.WorkshopEvent
+import app.votify.mobile.ui.workshop.WorkshopScreen
+import app.votify.mobile.ui.workshop.WorkshopViewModel
+import app.votify.mobile.ui.settings.SettingsEvent
+import app.votify.mobile.ui.settings.SettingsScreen
+import app.votify.mobile.ui.settings.AppIconSettingsScreen
+import app.votify.mobile.ui.settings.ArtworkSettingsScreen
+import app.votify.mobile.ui.settings.AudioSettingsScreen
+import app.votify.mobile.ui.settings.BackgroundsScreen
+import app.votify.mobile.ui.settings.GeneralSettingsScreen
+import app.votify.mobile.ui.settings.InterfaceSettingsScreen
+import app.votify.mobile.ui.settings.PlayerSettingsScreen
+import app.votify.mobile.ui.settings.PresetsScreen
+import app.votify.mobile.ui.settings.ProxySettingsScreen
+import androidx.compose.runtime.CompositionLocalProvider
+import app.votify.mobile.ui.components.LocalCustomPrefs
+import app.votify.mobile.ui.components.LocalHazeState
+import app.votify.mobile.ui.components.LocalLiquidGlass
+import app.votify.mobile.ui.components.rememberGlassSpec
+import app.votify.mobile.ui.components.toGlassSpec
+import app.votify.mobile.ui.components.VotifyHaptics
+import app.votify.mobile.ui.settings.StorageSettingsScreen
+import app.votify.mobile.ui.settings.SwipeSettingsScreen
+import app.votify.mobile.ui.settings.SettingsViewModel
+import app.votify.mobile.data.parseCustomPrefs
+import app.votify.mobile.data.toJson
+import app.votify.mobile.ui.theme.VotifyColors
+import app.votify.mobile.ui.theme.parseWorkshopSpec
+import app.votify.mobile.ui.theme.VotifyTheme
+import app.votify.mobile.ui.web.RizeWebScreen
+
+/** Dotify-style nav icons (design/screens/home.html): rounded house, folder, magnifier, profile. */
+private enum class Tab(val route: String, val label: Int, val icon: Int, val iconSelected: Int) {
+    Home("home", R.string.nav_home, R.drawable.ic_nav_home_outline, R.drawable.ic_nav_home_filled),
+    Library("library", R.string.nav_library, R.drawable.ic_nav_library_outline, R.drawable.ic_nav_library_filled),
+    Search("search", R.string.nav_search, R.drawable.ic_nav_search_outline, R.drawable.ic_nav_search_filled),
+    Settings("settings", R.string.settings_title, R.drawable.ic_nav_settings_outline, R.drawable.ic_nav_settings_filled),
+}
+
+private object Routes {
+    const val FAVORITES = "favorites"
+    const val DOWNLOADED = "downloaded"
+    const val HISTORY = "history"
+    const val SETTINGS = "settings"
+    const val ACCOUNT = "account"
+    const val PROFILE = "profile"
+    const val IMPORT = "import"
+    const val PLAYLIST = "playlist/{id}"
+    const val ARTIST = "artist/{name}"
+    const val TRENDING = "trending"
+    const val WORKSHOP = "workshop"
+    const val GENERAL = "settings/general"
+    const val AUDIO = "settings/audio"
+    const val STORAGE = "settings/storage"
+    const val SWIPES = "settings/swipes"
+    const val INTERFACE = "settings/interface"
+    const val PLAYER = "settings/player"
+    const val ARTWORK = "settings/artwork"
+    const val APP_ICON = "settings/app-icon"
+    const val BACKGROUNDS = "settings/backgrounds"
+    const val PRESETS = "settings/presets"
+    const val PROXY = "settings/proxy"
+    const val FRIENDS = "friends"
+    const val USER_PROFILE = "user/{uid}"
+
+    fun playlist(id: Long) = "playlist/$id"
+    fun artist(name: String) = "artist/${Uri.encode(name)}"
+}
+
+/** Сайт проекта — открывается по логотипу в шапке главной. */
+private const val VOTIFY_SITE = "https://votify-gamma.vercel.app/"
+
+private fun openSite(context: Context) {
+    runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(VOTIFY_SITE)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+}
+
+@Composable
+fun VotifyRoot() {
+    val app = VotifyApp.instance
+    val settings by app.settings.settings.collectAsStateWithLifecycle(initialValue = Settings())
+
+    VotifyTheme(theme = settings.theme, customThemeJson = settings.customTheme, prefs = parseCustomPrefs(settings.customPrefs)) {
+        VotifyScaffold(app = app, settings = settings)
+    }
+}
+
+@Composable
+private fun VotifyScaffold(app: VotifyApp, settings: Settings) {
+    val player = app.player
+    val playerState by player.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    val navController = rememberNavController()
+    val backStack by navController.currentBackStackEntryAsState()
+    val currentDestination = backStack?.destination
+
+    var playerExpanded by remember { mutableStateOf(false) }
+    BackHandler(enabled = playerExpanded) { playerExpanded = false }
+
+    val mainActivity = context as? app.votify.mobile.MainActivity
+    LaunchedEffect(mainActivity?.openPlayerRequested) {
+        if (mainActivity?.openPlayerRequested == true) {
+            playerExpanded = true
+            mainActivity.openPlayerRequested = false
+        }
+    }
+
+    val snackbar = remember { SnackbarHostState() }
+    val snackbarScope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(playerState.error) {
+        playerState.error?.let {
+            snackbar.showSnackbar(it)
+            player.clearError()
+        }
+    }
+
+    val factory = remember { AppViewModelFactory(app) }
+    val homeVm: HomeViewModel = viewModel(factory = factory)
+    val searchVm: SearchViewModel = viewModel(factory = factory)
+    val libraryVm: LibraryViewModel = viewModel(factory = factory)
+    val playerVm: PlayerViewModel = viewModel(factory = factory)
+    val artistVm: ArtistViewModel = viewModel(factory = factory)
+    val settingsVm: SettingsViewModel = viewModel(factory = factory)
+    val accountVm: AccountViewModel = viewModel(factory = factory)
+    val importVm: ImportViewModel = viewModel(factory = factory)
+    val trendingVm: TrendingViewModel = viewModel(factory = factory)
+    val workshopVm: WorkshopViewModel = viewModel(factory = factory)
+    val profileVm: ProfileViewModel = viewModel(factory = factory)
+    val friendsVm: FriendsViewModel = viewModel(factory = factory)
+
+    val globalAccount by accountVm.account.collectAsStateWithLifecycle()
+    val downloadedIds by libraryVm.downloadedIds.collectAsStateWithLifecycle()
+    val favoriteIds by libraryVm.favoriteIds.collectAsStateWithLifecycle()
+    val currentId = playerState.current?.id
+    val currentIsFavorite = currentId != null && favoriteIds.contains(currentId)
+    val playlists by libraryVm.playlists.collectAsStateWithLifecycle()
+    val menu by libraryVm.menu.collectAsStateWithLifecycle()
+    val picker by libraryVm.playlistPicker.collectAsStateWithLifecycle()
+    val queueOpen by libraryVm.queueOpen.collectAsStateWithLifecycle()
+    val lyricsVisible by playerVm.lyricsVisible.collectAsStateWithLifecycle()
+    val lyrics by playerVm.lyrics.collectAsStateWithLifecycle()
+
+    // Periodically poll for updates so the banner pops up automatically without restarting
+    LaunchedEffect(Unit) {
+        while (true) {
+            app.updateManager.checkForUpdate()
+            kotlinx.coroutines.delay(25_000)
+        }
+    }
+
+    // Snackbar messages from library actions (resolved to localized text here).
+    LaunchedEffect(libraryVm) {
+        libraryVm.messages.collect { m ->
+            snackbar.showSnackbar(context.getString(m.id, *m.args.toTypedArray()))
+        }
+    }
+    LaunchedEffect(settingsVm) {
+        settingsVm.events.collect { e ->
+            when (e) {
+                is SettingsEvent.QualitySaved -> snackbar.showSnackbar(
+                    context.getString(
+                        R.string.toast_quality_saved,
+                        context.getString(
+                            when (e.quality) {
+                                AudioQuality.Low -> R.string.settings_quality_low
+                                AudioQuality.Medium -> R.string.settings_quality_medium
+                                AudioQuality.High -> R.string.settings_quality_high
+                            },
+                        ),
+                    ),
+                )
+                SettingsEvent.QualityFailed -> snackbar.showSnackbar(context.getString(R.string.toast_quality_failed))
+                is SettingsEvent.ServerSaved ->
+                    if (e.url.isEmpty()) snackbar.showSnackbar(context.getString(R.string.toast_server_reset))
+                    else snackbar.showSnackbar(context.getString(R.string.toast_server_saved, e.url))
+                SettingsEvent.ServerInvalid -> snackbar.showSnackbar(context.getString(R.string.toast_server_invalid))
+                SettingsEvent.LoggedOut -> snackbar.showSnackbar(context.getString(R.string.toast_logged_out))
+                is SettingsEvent.Message -> snackbar.showSnackbar(e.text)
+                is SettingsEvent.PresetApplied -> snackbar.showSnackbar(context.getString(R.string.preset_applied, e.name))
+            }
+        }
+    }
+
+    // Account: welcome snackbar after login/registration/password reset.
+    LaunchedEffect(accountVm) {
+        accountVm.events.collect { e ->
+            when (e) {
+                is AccountEvent.LoggedIn -> {
+                    snackbar.showSnackbar(context.getString(R.string.toast_account_login, e.displayName))
+                    if (currentDestination?.route == Routes.ACCOUNT) navController.popBackStack()
+                }
+                AccountEvent.LoggedOut -> snackbar.showSnackbar(context.getString(R.string.toast_logged_out))
+                AccountEvent.DataRestored -> snackbar.showSnackbar(context.getString(R.string.sync_auto_restored))
+                AccountEvent.DataSaved -> snackbar.showSnackbar(context.getString(R.string.sync_auto_saved))
+            }
+        }
+    }
+
+    // Workshop: snackbars for applied/published themes and Firebase config state.
+    LaunchedEffect(workshopVm) {
+        workshopVm.events.collect { e ->
+            when (e) {
+                is WorkshopEvent.Applied -> snackbar.showSnackbar(context.getString(R.string.toast_theme_applied, e.name))
+                is WorkshopEvent.Published -> snackbar.showSnackbar(context.getString(R.string.toast_theme_published, e.title))
+                is WorkshopEvent.ConfigSaved -> snackbar.showSnackbar(
+                    context.getString(
+                        if (e.fromServer) R.string.toast_firebase_from_server else R.string.toast_firebase_saved,
+                    ),
+                )
+                WorkshopEvent.ConfigInvalid -> snackbar.showSnackbar(context.getString(R.string.toast_firebase_invalid))
+                WorkshopEvent.BackgroundSet -> snackbar.showSnackbar(context.getString(R.string.toast_bg_applied))
+                WorkshopEvent.BackgroundCleared -> snackbar.showSnackbar(context.getString(R.string.toast_bg_cleared))
+                WorkshopEvent.BadUrl -> snackbar.showSnackbar(context.getString(R.string.toast_bg_bad_url))
+                WorkshopEvent.BadColor -> snackbar.showSnackbar(context.getString(R.string.toast_accent_invalid))
+                is WorkshopEvent.Message -> snackbar.showSnackbar(e.text)
+                WorkshopEvent.Deleted -> snackbar.showSnackbar(context.getString(R.string.workshop_deleted))
+                WorkshopEvent.Unlinked -> snackbar.showSnackbar(context.getString(R.string.workshop_unlinked))
+            }
+        }
+    }
+
+    // Import: snackbar + open the freshly created playlist.
+    LaunchedEffect(importVm) {
+        importVm.events.collect { e ->
+            when (e) {
+                is ImportEvent.Imported -> {
+                    snackbar.showSnackbar(context.getString(R.string.toast_imported, e.count, e.total, e.name))
+                    navController.navigate(Routes.playlist(e.playlistId)) { launchSingleTop = true }
+                }
+            }
+        }
+    }
+
+    /** Android share sheet: track title + artist and a YouTube/origin link. */
+    val shareTrack: (Track) -> Unit = { track ->
+        val link = when {
+            track.id.length == 11 && !track.id.startsWith("sc_") -> "https://youtu.be/${track.id}"
+            track.url.isNotBlank() -> track.url
+            else -> ""
+        }
+        val text = buildString {
+            append(track.title)
+            if (track.artist.isNotBlank() && track.artist != "Unknown") append(" — ").append(track.artist)
+            if (link.isNotBlank()) append("\n").append(link)
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        context.startActivity(Intent.createChooser(send, context.getString(R.string.action_share)))
+    }
+
+    // "Show lyrics over artwork" preference: open the player straight into lyrics mode.
+    LaunchedEffect(playerExpanded, settings.showLyricsOverArtwork) {
+        if (playerExpanded && settings.showLyricsOverArtwork && !playerVm.lyricsVisible.value) playerVm.toggleLyrics()
+    }
+
+    // Apply saved playback remix preset when track changes or when preference changes.
+    val cp = parseCustomPrefs(settings.customPrefs)
+    LaunchedEffect(
+        cp.crossfade,
+        cp.crossfadeSeconds,
+    ) {
+        // Кроссфейд — реальный: плавное затухание текущего трека и нарастание следующего.
+        player.setCrossfade(cp.crossfade, cp.crossfadeSeconds)
+    }
+    LaunchedEffect(
+        cp.gapless,
+        cp.normalization,
+        cp.onNotification,
+    ) {
+        // Настройки звука, которые живут на самом плеере.
+        player.requestAudioPreferences(
+            gapless = cp.gapless,
+            normalization = cp.normalization,
+            pauseOnDuck = cp.onNotification == "pause",
+        )
+    }
+    LaunchedEffect(
+        cp.playbackSpeed,
+        cp.playbackPitch,
+        cp.pitchShiftLinked,
+        cp.reverbPreset,
+        cp.bassBoost,
+        playerState.current?.id,
+    ) {
+        val s = if (cp.playbackSpeed in 0.25f..2.5f) cp.playbackSpeed else 1.0f
+        val p = if (cp.playbackPitch in 0.25f..2.5f) cp.playbackPitch else s
+        player.setPlaybackRemix(speed = s, pitch = p, pitchLinked = cp.pitchShiftLinked)
+        player.setReverb(cp.reverbPreset)
+        player.setBassBoost(cp.bassBoost)
+    }
+
+    LaunchedEffect(cp.equalizerBands) {
+        val bands = cp.equalizerBands.split(",")
+            .mapNotNull { it.trim().toFloatOrNull() }
+        if (bands.size == 6) {
+            player.setEqualizerBands(bands)
+        }
+    }
+
+    val statusBar = WindowInsets.statusBars.asPaddingValues()
+    val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // Content can scroll freely under the translucent nav bar and mini-player.
+    // We add standard clearance so the last element isn't permanently obscured, but cards scroll all the way underneath.
+    val hasMini = playerState.current != null
+    val navHeightDp = cp.navBarHeight.coerceIn(48, 80).dp
+    val islandExtra = if (cp.navBarIsland) 12.dp else 0.dp
+    val bottomClearance = navHeightDp + islandExtra + (if (hasMini) 72.dp else 0.dp) + navBarInset + 24.dp
+    val contentPadding = PaddingValues(top = statusBar.calculateTopPadding(), bottom = bottomClearance)
+
+    val play: (List<Track>, Int) -> Unit = { tracks, i -> player.play(tracks, i) }
+    // «Перемешать»: включаем режим перемешивания и запускаем список целиком —
+    // плеер сам перемешает его без повторов.
+    val shufflePlay: (List<Track>) -> Unit = { tracks ->
+        player.setShuffle(true)
+        player.play(tracks, 0)
+    }
+    val openArtist: (String) -> Unit = { name ->
+        playerExpanded = false
+        libraryVm.closeMenu()
+        navController.navigate(Routes.artist(name)) { launchSingleTop = true }
+    }
+    val openMenu: (Track) -> Unit = { libraryVm.openMenu(it) }
+
+    // App background: any image URL (incl. animated GIF/WebP) behind the whole app.
+    // Independent of the theme — changing any setting must never wipe the background.
+    val bgPrefs = parseCustomPrefs(settings.customPrefs)
+    val bgSpec = parseWorkshopSpec(settings.customTheme)
+    val workshopBgUrl = if (settings.theme == AppTheme.Workshop && !bgPrefs.themeApplyBackground) {
+        ""
+    } else if (settings.theme == AppTheme.Workshop && bgSpec.backgroundUrl.isNotBlank()) {
+        bgSpec.backgroundUrl
+    } else {
+        settings.backgroundUrl
+    }
+    // Fine-tuning: Настройки → Фон («затемнение»/«размытие», prefs.bgDim/bgBlur).
+    // Размытие обоев задаётся ТОЛЬКО ползунком «Размытие фона» в настройках фона.
+    // Раньше включённый Liquid Glass принудительно размывал обои минимум на 40 dp —
+    // из-за этого картинка фона становилась мутной и это выглядело странно.
+    // Стекло размывает только то, что лежит под поверхностью, а не сами обои.
+    val bgBlurDp = bgPrefs.bgBlur.coerceIn(0, 60)
+    val bgDimAlpha = bgPrefs.bgDim.coerceIn(0, 92) / 100f
+    // Единое стекло: тумблер Liquid Glass и два ползунка управляют и панелью, и интерфейсом.
+    // Настройки известны напрямую — считаем без CompositionLocal, иначе взялись бы дефолты.
+    val glassSpec = bgPrefs.toGlassSpec()
+    // imePadding: with edge-to-edge the keyboard would cover the bottom nav — on the search
+    // screen that made it impossible to return to Home without the system back gesture.
+    Box(Modifier.fillMaxSize().imePadding().background(VotifyColors.SurfaceBase)) {
+        // ДВА независимых состояния размытия, потому что в haze 0.7.x на одно состояние
+        // допускается только один узел-источник, а источникам нужно разное содержимое:
+        //  • contentHazeState — фон + содержимое; на него смотрят панель и мини-плеер,
+        //    чтобы прокрутка, ушедшая под панель, была видна через стекло размытой;
+        //  • bgHazeState — только фон; на него смотрят карточки внутри содержимого.
+        // Иначе карточка оказалась бы потомком своего источника и размылась бы сама
+        // (вместе со своим текстом), а не фон под ней.
+        val contentHazeState = remember { HazeState() }
+        val bgHazeState = remember { HazeState() }
+        CompositionLocalProvider(
+            LocalCustomPrefs provides bgPrefs,
+            LocalLiquidGlass provides glassSpec.enabled,
+            LocalHazeState provides bgHazeState,
+        ) {
+            Scaffold(
+                containerColor = Color.Transparent,
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                snackbarHost = { /* Intrusive toast notifications removed per user request */ },
+            ) { _ ->
+                Box(Modifier.fillMaxSize()) {
+                    // СОСТОЯНИЕ 1 (contentHazeState) — источник для панели и мини-плеера:
+                    // фон вместе с содержимым, чтобы под стеклом читалась прокрутка.
+                    // Карточки лежат внутри NavHost, но они НЕ потомки вложенного источника ниже.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .haze(contentHazeState),
+                    ) {
+                        // СОСТОЯНИЕ 2 (bgHazeState) — источник для карточек: только фон.
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .haze(bgHazeState),
+                        ) {
+                            // Базовая подложка: даже без обоев есть что размывать.
+                            Box(Modifier.fillMaxSize().background(VotifyColors.SurfaceBase))
+                            if (workshopBgUrl.isNotBlank()) {
+                                coil.compose.AsyncImage(
+                                    model = workshopBgUrl,
+                                    contentDescription = null,
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    alignment = androidx.compose.ui.Alignment.Center,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .blur(bgBlurDp.dp),
+                                )
+                                // Dim the background so text on cards stays readable (Настройки → Фон → Затемнение).
+                                Box(
+                                    Modifier.fillMaxSize().background(
+                                        androidx.compose.ui.graphics.Color.Black.copy(alpha = bgDimAlpha),
+                                    ),
+                                )
+                            } else {
+                                // Dynamic adaptive ambient cover layer (syncing cleanly like PC without circle shapes)
+                                val isDarkTheme = LocalVotifyPalette.current.isDark
+                                val ambCover = playerState.current?.cover ?: homeVm.state.collectAsStateWithLifecycle().value.wave.firstOrNull()?.cover.orEmpty()
+                                if (ambCover.isNotBlank() && isDarkTheme) {
+                                    Box(Modifier.fillMaxSize()) {
+                                        coil.compose.AsyncImage(
+                                            model = coil.request.ImageRequest.Builder(LocalContext.current)
+                                                .data(ambCover)
+                                                .crossfade(600)
+                                                .build(),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .graphicsLayer {
+                                                    alpha = 0.35f
+                                                    scaleX = 2.4f
+                                                    scaleY = 2.4f
+                                                }
+                                                .blur(90.dp),
+                                        )
+                                        Box(
+                                            Modifier.fillMaxSize().background(
+                                                androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.40f)
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        val rootTabs = listOf(Tab.Home.route, Tab.Library.route, Tab.Search.route, Tab.Settings.route)
+                        val ribbonDuration = 260
+                        val ribbonEasing = androidx.compose.animation.core.FastOutSlowInEasing
+
+                        NavHost(
+                            navController,
+                            startDestination = Tab.Home.route,
+                            modifier = Modifier.fillMaxSize(),
+                            enterTransition = {
+                                val from = initialState.destination.route.orEmpty()
+                                val to = targetState.destination.route.orEmpty()
+                                val fromIdx = rootTabs.indexOf(from)
+                                val toIdx = rootTabs.indexOf(to)
+                                if (fromIdx != -1 && toIdx != -1) {
+                                    if (toIdx > fromIdx) {
+                                        androidx.compose.animation.slideInHorizontally(
+                                            animationSpec = androidx.compose.animation.core.tween(ribbonDuration, easing = ribbonEasing),
+                                            initialOffsetX = { it },
+                                        ) + androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(ribbonDuration))
+                                    } else {
+                                        androidx.compose.animation.slideInHorizontally(
+                                            animationSpec = androidx.compose.animation.core.tween(ribbonDuration, easing = ribbonEasing),
+                                            initialOffsetX = { -it },
+                                        ) + androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(ribbonDuration))
+                                    }
+                                } else {
+                                    androidx.compose.animation.slideInHorizontally(
+                                        initialOffsetX = { fullWidth -> (fullWidth * 0.35f).toInt() },
+                                        animationSpec = androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)),
+                                    ) + androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(220))
+                                }
+                            },
+                            exitTransition = {
+                                val from = initialState.destination.route.orEmpty()
+                                val to = targetState.destination.route.orEmpty()
+                                val fromIdx = rootTabs.indexOf(from)
+                                val toIdx = rootTabs.indexOf(to)
+                                if (fromIdx != -1 && toIdx != -1) {
+                                    if (toIdx > fromIdx) {
+                                        androidx.compose.animation.slideOutHorizontally(
+                                            animationSpec = androidx.compose.animation.core.tween(ribbonDuration, easing = ribbonEasing),
+                                            targetOffsetX = { -it },
+                                        ) + androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(ribbonDuration))
+                                    } else {
+                                        androidx.compose.animation.slideOutHorizontally(
+                                            animationSpec = androidx.compose.animation.core.tween(ribbonDuration, easing = ribbonEasing),
+                                            targetOffsetX = { it },
+                                        ) + androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(ribbonDuration))
+                                    }
+                                } else {
+                                    androidx.compose.animation.slideOutHorizontally(
+                                        targetOffsetX = { fullWidth -> -(fullWidth * 0.25f).toInt() },
+                                        animationSpec = androidx.compose.animation.core.tween(280, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)),
+                                    ) + androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(200))
+                                }
+                            },
+                            popEnterTransition = {
+                                val from = initialState.destination.route.orEmpty()
+                                val to = targetState.destination.route.orEmpty()
+                                val fromIdx = rootTabs.indexOf(from)
+                                val toIdx = rootTabs.indexOf(to)
+                                if (fromIdx != -1 && toIdx != -1) {
+                                    if (toIdx > fromIdx) {
+                                        androidx.compose.animation.slideInHorizontally(
+                                            animationSpec = androidx.compose.animation.core.tween(ribbonDuration, easing = ribbonEasing),
+                                            initialOffsetX = { it },
+                                        ) + androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(ribbonDuration))
+                                    } else {
+                                        androidx.compose.animation.slideInHorizontally(
+                                            animationSpec = androidx.compose.animation.core.tween(ribbonDuration, easing = ribbonEasing),
+                                            initialOffsetX = { -it },
+                                        ) + androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(ribbonDuration))
+                                    }
+                                } else {
+                                    androidx.compose.animation.slideInHorizontally(
+                                        initialOffsetX = { fullWidth -> -(fullWidth * 0.25f).toInt() },
+                                        animationSpec = androidx.compose.animation.core.tween(280, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)),
+                                    ) + androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(200))
+                                }
+                            },
+                            popExitTransition = {
+                                val from = initialState.destination.route.orEmpty()
+                                val to = targetState.destination.route.orEmpty()
+                                val fromIdx = rootTabs.indexOf(from)
+                                val toIdx = rootTabs.indexOf(to)
+                                if (fromIdx != -1 && toIdx != -1) {
+                                    if (toIdx > fromIdx) {
+                                        androidx.compose.animation.slideOutHorizontally(
+                                            animationSpec = androidx.compose.animation.core.tween(ribbonDuration, easing = ribbonEasing),
+                                            targetOffsetX = { -it },
+                                        ) + androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(ribbonDuration))
+                                    } else {
+                                        androidx.compose.animation.slideOutHorizontally(
+                                            animationSpec = androidx.compose.animation.core.tween(ribbonDuration, easing = ribbonEasing),
+                                            targetOffsetX = { it },
+                                        ) + androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(ribbonDuration))
+                                    }
+                                } else {
+                                    androidx.compose.animation.slideOutHorizontally(
+                                        targetOffsetX = { fullWidth -> (fullWidth * 0.35f).toInt() },
+                                        animationSpec = androidx.compose.animation.core.tween(280, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)),
+                                    ) + androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(200))
+                                }
+                            },
+                        ) {
+                            composable(Tab.Home.route) {
+                            HomeScreen(
+                                viewModel = homeVm,
+                                contentPadding = contentPadding,
+                                onPlay = play,
+                                playerState = playerState,
+                                onSeek = player::seekTo,
+                                iosSlider = parseCustomPrefs(settings.customPrefs).sliderStyle == "ios",
+                                onOpenSearch = { navController.navigate(Tab.Search.route) { launchSingleTop = true } },
+                                onOpenHistory = { navController.navigate(Routes.HISTORY) { launchSingleTop = true } },
+                                onOpenFavorites = { navController.navigate(Routes.FAVORITES) { launchSingleTop = true } },
+                                onOpenSettings = { navController.navigate(Tab.Settings.route) { launchSingleTop = true } },
+                                onOpenAccount = { navController.navigate(Routes.ACCOUNT) { launchSingleTop = true } },
+                                onOpenTrending = { navController.navigate(Routes.TRENDING) { launchSingleTop = true } },
+                                onOpenSite = { openSite(context) },
+                                onOpenPlaylist = { id -> navController.navigate("playlist/$id") { launchSingleTop = true } },
+                                onOpenArtist = { name -> navController.navigate("artist/${android.net.Uri.encode(name)}") { launchSingleTop = true } },
+                                onPlayPause = player::togglePlayPause,
+                                favoriteIds = favoriteIds,
+                                onToggleFavorite = { libraryVm.toggleFavorite(it) },
+                                userAvatar = profileVm.state.value.profile?.avatar,
+                                userName = globalAccount?.username ?: "exieeez",
+                            )
+                        }
+                        composable(Tab.Search.route) {
+                            SearchScreen(
+                                viewModel = searchVm,
+                                currentTrackId = playerState.current?.id,
+                                contentPadding = contentPadding,
+                                onPlay = play,
+                                onMore = openMenu,
+                                onBack = { navController.popBackStack() },
+                                onOpenSettings = {
+                                    navController.navigate(Tab.Settings.route) { launchSingleTop = true }
+                                },
+                                onOpenArtist = { name ->
+                                    navController.navigate("artist/${android.net.Uri.encode(name)}") { launchSingleTop = true }
+                                },
+                            )
+                        }
+                        composable(Tab.Library.route) {
+                            LibraryScreen(
+                                viewModel = libraryVm,
+                                currentTrackId = playerState.current?.id,
+                                contentPadding = contentPadding,
+                                onPlay = play,
+                                onOpenFavorites = { navController.navigate(Routes.FAVORITES) { launchSingleTop = true } },
+                                onOpenDownloaded = { navController.navigate(Routes.DOWNLOADED) { launchSingleTop = true } },
+                                onOpenHistory = { navController.navigate(Routes.HISTORY) { launchSingleTop = true } },
+                                onOpenPlaylist = { id -> navController.navigate(Routes.playlist(id)) { launchSingleTop = true } },
+                                onOpenSettings = { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
+                                onImport = { navController.navigate(Routes.IMPORT) { launchSingleTop = true } },
+                                onOpenAccount = { navController.navigate(Routes.PROFILE) { launchSingleTop = true } },
+                                onOpenSearch = { navController.navigate(Tab.Search.route) { launchSingleTop = true } },
+                                onOpenArtist = { name -> navController.navigate(Routes.artist(name)) { launchSingleTop = true } },
+                            )
+                        }
+                        composable(Routes.FAVORITES) {
+                            FavoritesScreen(
+                                viewModel = libraryVm,
+                                currentTrackId = playerState.current?.id,
+                                isPlaying = playerState.isPlaying,
+                                onTogglePlay = { player.togglePlayPause() },
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onPlay = play,
+                                onShufflePlay = shufflePlay,
+                            )
+                        }
+                        composable(Routes.DOWNLOADED) {
+                            DownloadedScreen(
+                                viewModel = libraryVm,
+                                currentTrackId = playerState.current?.id,
+                                isPlaying = playerState.isPlaying,
+                                onTogglePlay = { player.togglePlayPause() },
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onPlay = play,
+                                onShufflePlay = shufflePlay,
+                            )
+                        }
+                        composable(Routes.HISTORY) {
+                            HistoryScreen(
+                                viewModel = libraryVm,
+                                currentTrackId = playerState.current?.id,
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onPlay = play,
+                            )
+                        }
+                        composable(Routes.PLAYLIST, arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+                            val id = entry.arguments?.getLong("id") ?: return@composable
+                            PlaylistScreen(
+                                viewModel = libraryVm,
+                                playlistId = id,
+                                currentTrackId = playerState.current?.id,
+                                isPlaying = playerState.isPlaying,
+                                onTogglePlay = { player.togglePlayPause() },
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onPlay = play,
+                                onShufflePlay = shufflePlay,
+                            )
+                        }
+                        composable(Routes.ARTIST, arguments = listOf(navArgument("name") { type = NavType.StringType })) { entry ->
+                            val name = entry.arguments?.getString("name").orEmpty()
+                            ArtistScreen(
+                                viewModel = artistVm,
+                                name = name,
+                                currentTrackId = playerState.current?.id,
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onPlay = play,
+                                onMore = openMenu,
+                                onOpenArtist = { newName -> navController.navigate("artist/${android.net.Uri.encode(newName)}") { launchSingleTop = true } },
+                            )
+                        }
+                        composable(Routes.SETTINGS) {
+                            SettingsScreen(
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onOpenGeneral = { navController.navigate(Routes.GENERAL) { launchSingleTop = true } },
+                                onOpenAudio = { navController.navigate(Routes.AUDIO) { launchSingleTop = true } },
+                                onOpenStorage = { navController.navigate(Routes.STORAGE) { launchSingleTop = true } },
+                                onOpenInterface = { navController.navigate(Routes.INTERFACE) { launchSingleTop = true } },
+                                onOpenPlayer = { navController.navigate(Routes.PLAYER) { launchSingleTop = true } },
+                                onOpenArtwork = { navController.navigate(Routes.ARTWORK) { launchSingleTop = true } },
+                                onOpenAppIcon = { navController.navigate(Routes.APP_ICON) { launchSingleTop = true } },
+                                onOpenBackgrounds = { navController.navigate(Routes.BACKGROUNDS) { launchSingleTop = true } },
+                                onOpenPresets = { navController.navigate(Routes.PRESETS) { launchSingleTop = true } },
+                                onOpenWorkshop = { navController.navigate(Routes.WORKSHOP) { launchSingleTop = true } },
+                                onOpenProxy = { navController.navigate(Routes.PROXY) { launchSingleTop = true } },
+                                onOpenSwipes = { navController.navigate(Routes.SWIPES) { launchSingleTop = true } },
+                            )
+                        }
+                        composable(Routes.SWIPES) {
+                            SwipeSettingsScreen(settingsVm, contentPadding, onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.GENERAL) {
+                            GeneralSettingsScreen(
+                                viewModel = settingsVm,
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onOpenAccount = { navController.navigate(Routes.PROFILE) { launchSingleTop = true } },
+                            )
+                        }
+                        composable(Routes.AUDIO) {
+                            AudioSettingsScreen(settingsVm, contentPadding, onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.STORAGE) {
+                            StorageSettingsScreen(settingsVm, contentPadding, onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.INTERFACE) {
+                            InterfaceSettingsScreen(settingsVm, contentPadding, onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.PLAYER) {
+                            PlayerSettingsScreen(
+                                settingsVm,
+                                contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onOpenPresets = { navController.navigate(Routes.PRESETS) { launchSingleTop = true } },
+                            )
+                        }
+                        composable(Routes.ARTWORK) {
+                            ArtworkSettingsScreen(settingsVm, contentPadding, onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.APP_ICON) {
+                            AppIconSettingsScreen(settingsVm, contentPadding, onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.BACKGROUNDS) {
+                            BackgroundsScreen(settingsVm, contentPadding, onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.PRESETS) {
+                            PresetsScreen(settingsVm, contentPadding, onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.PROXY) {
+                            ProxySettingsScreen(settingsVm, contentPadding, onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.TRENDING) {
+                            TrendingScreen(
+                                viewModel = trendingVm,
+                                currentTrackId = playerState.current?.id,
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onPlay = play,
+                                onMore = openMenu,
+                            )
+                        }
+                        composable(Routes.WORKSHOP) {
+                            WorkshopScreen(
+                                viewModel = workshopVm,
+                                currentTheme = settings.theme,
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onPickBuiltIn = { theme ->
+                                    settingsVm.setTheme(theme)
+                                    if (theme != AppTheme.Workshop) settingsVm.clearCustomTheme()
+                                },
+                            )
+                        }
+                        composable(Routes.ACCOUNT) {
+                            val acct by accountVm.account.collectAsStateWithLifecycle()
+                            if (acct != null) {
+                                ProfileScreen(
+                                    viewModel = profileVm,
+                                    contentPadding = contentPadding,
+                                    onBack = { navController.popBackStack() },
+                                    onOpenFriends = { navController.navigate(Routes.FRIENDS) },
+                                    onOpenSettings = { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
+                                    onToast = { snackbarScope.launch { snackbar.showSnackbar(it) } },
+                                    onPlayFav = { fav ->
+                                        val id = Regex("[?&]v=([a-zA-Z0-9_-]{11})")
+                                            .find(fav.id)?.groupValues?.get(1)
+                                            ?: Regex("""youtu\.be/([a-zA-Z0-9_-]{11})""")
+                                                .find(fav.id)?.groupValues?.get(1)
+                                                ?: fav.id
+                                        if (id.length == 11) {
+                                            player.playTrack(Track(id, fav.title, fav.artist, fav.cover, "", fav.duration))
+                                        }
+                                    },
+                                    onOpenLogin = { navController.navigate(Routes.ACCOUNT) },
+                                    onLogout = { accountVm.logout() },
+                                )
+                            } else {
+                                AccountScreen(
+                                    viewModel = accountVm,
+                                    contentPadding = contentPadding,
+                                    onBack = { navController.popBackStack() },
+                                )
+                            }
+                        }
+                        composable(Routes.PROFILE) {
+                            ProfileScreen(
+                                viewModel = profileVm,
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onOpenFriends = { navController.navigate(Routes.FRIENDS) },
+                                onOpenSettings = { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
+                                onToast = { snackbarScope.launch { snackbar.showSnackbar(it) } },
+                                onPlayFav = { fav ->
+                                    val id = Regex("[?&]v=([a-zA-Z0-9_-]{11})")
+                                        .find(fav.id)?.groupValues?.get(1)
+                                        ?: Regex("""youtu\.be/([a-zA-Z0-9_-]{11})""")
+                                            .find(fav.id)?.groupValues?.get(1)
+                                            ?: fav.id
+                                    if (id.length == 11) {
+                                        player.playTrack(Track(id, fav.title, fav.artist, fav.cover, "", fav.duration))
+                                    }
+                                },
+                                onOpenLogin = { navController.navigate(Routes.ACCOUNT) },
+                                onLogout = { accountVm.logout() },
+                            )
+                        }
+                        composable(Routes.FRIENDS) {
+                            FriendsScreen(
+                                viewModel = friendsVm,
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onOpenUser = { uid -> navController.navigate("user/$uid") },
+                            )
+                        }
+                        composable(Routes.USER_PROFILE, arguments = listOf(navArgument("uid") { type = NavType.StringType })) { entry ->
+                            val uid = entry.arguments?.getString("uid").orEmpty()
+                            UserScreen(
+                                viewModel = friendsVm,
+                                uid = uid,
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                                onPlayFav = { fav ->
+                                    val id = Regex("[?&]v=([a-zA-Z0-9_-]{11})")
+                                        .find(fav.id)?.groupValues?.get(1)
+                                        ?: fav.id
+                                    if (id.length == 11) {
+                                        player.playTrack(Track(id, fav.title, fav.artist, fav.cover, "", fav.duration))
+                                    }
+                                },
+                            )
+                        }
+                        composable(Routes.IMPORT) {
+                            ImportScreen(
+                                viewModel = importVm,
+                                contentPadding = contentPadding,
+                                onBack = { navController.popBackStack() },
+                            )
+                        }
+                    }
+                }
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(),
+            ) {
+                // Floating mini-player and update banner area
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    UpdateBanner(
+                        updateManager = app.updateManager,
+                        modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
+                    )
+                    AnimatedVisibility(
+                        visible = hasMini,
+                        enter = slideInVertically { it } + fadeIn(),
+                        exit = slideOutVertically { it } + fadeOut(),
+                    ) {
+                        MiniPlayer(
+                            state = playerState,
+                            isFavorite = currentIsFavorite,
+                            onClick = { playerExpanded = true },
+                            onPlayPause = player::togglePlayPause,
+                            onToggleFavorite = { playerState.current?.let(libraryVm::toggleFavorite) },
+                            onSwipeLeft = {
+                                when (cp.miniSwipeLeft) {
+                                    "previous" -> player.previous()
+                                    "queue" -> libraryVm.openQueue()
+                                    else -> player.next()
+                                }
+                            },
+                            onSwipeRight = {
+                                when (cp.miniSwipeRight) {
+                                    "next" -> player.next()
+                                    "queue" -> libraryVm.openQueue()
+                                    else -> player.previous()
+                                }
+                            },
+                            onDismiss = {
+                                player.dismiss()
+                            },
+                            hazeState = contentHazeState,
+                            style = MiniStyle(
+                                pillShape = true,
+                                cornerRadiusDp = 999.dp,
+                                roundCover = true,
+                                ringProgress = true,
+                                barProgress = false,
+                                showLike = true,
+                                filledPlay = true,
+                                artworkTint = false,
+                            ),
+                        )
+                    }
+                }
+
+                // Docked bottom navigation bar matching user screenshot (solid black, no island, top-rounded)
+                VotifyNavBar(
+                    selected = Tab.entries.firstOrNull { t -> currentDestination?.hierarchy?.any { it.route == t.route } == true } ?: Tab.Home,
+                    onSelect = { tab ->
+                        if (tab == Tab.Home) {
+                            navController.navigate(Tab.Home.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    inclusive = false
+                                    saveState = false
+                                }
+                                launchSingleTop = true
+                                restoreState = false
+                            }
+                        } else {
+                            navController.navigate(tab.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    },
+                    cp = cp,
+                    hazeState = contentHazeState,
+                )
+            }
+        }
+    }
+}
+
+        val density = LocalDensity.current
+        val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+        val playerSlideProgress by animateFloatAsState(
+            targetValue = if (playerExpanded && playerState.current != null) 0f else 1f,
+            animationSpec = tween(
+                durationMillis = if (playerExpanded) 320 else 260,
+                easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)
+            ),
+            label = "playerSlideProgress"
+        )
+
+        if (playerState.current != null) {
+            val cp = parseCustomPrefs(settings.customPrefs)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationY = screenHeightPx * playerSlideProgress
+                        alpha = if (playerSlideProgress >= 1f) 0f else 1f
+                    }
+            ) {
+                PlayerScreen(
+                state = playerState,
+                artworkStyle = settings.artworkStyle,
+                background = settings.playerBackground,
+                // Плеер вызывается вне провайдера настроек, поэтому стекло передаём явно —
+                // те же значения ползунков, что видит остальной интерфейс.
+                // Плеер закрывает весь экран, поэтому панели должны размывать его
+                // СОБСТВЕННЫЙ фон, а не содержимое под ним — источник выбирает сам плеер.
+                glassSpec = cp.toGlassSpec(),
+                visuals = PlayerVisuals(
+                    titleLeft = cp.titleAlign == "left",
+                    pillPlayButton = cp.playButtonStyle == "pill",
+                    infoChip = cp.infoChip,
+                    gifArtwork = cp.gifArtwork,
+                    artworkAnimation = cp.artworkAnimation,
+                    themedSliderHex = if (cp.themeApplySlider && settings.customTheme.isNotBlank()) parseWorkshopSpec(settings.customTheme).primary else "",
+                    artBlur = cp.artBlur,
+                    artDim = cp.artDim,
+                    gifAlways = cp.themeArtworkAlways,
+                    artworkEffect = cp.artworkEffect,
+                    artworkInside = cp.artworkInside,
+                    accentFromArt = cp.accentFromArt,
+                    swipeNavigation = cp.playerSwipes,
+                    iosSlider = cp.sliderStyle == "ios",
+                    sliderStyle = cp.sliderStyle,
+                    playerDesign = cp.playerDesign,
+                ),
+                isFavorite = currentIsFavorite,
+                lyricsVisible = lyricsVisible,
+                lyrics = lyrics,
+                userName = globalAccount?.username ?: "exieeez",
+                userAvatar = profileVm.state.value.profile?.avatar,
+                isDownloaded = playerState.current?.let { it.id in downloadedIds } == true,
+                onCollapse = { playerExpanded = false },
+                onPlayPause = player::togglePlayPause,
+                onNext = { player.next() },
+                onPrevious = player::previous,
+                onSeek = player::seekTo,
+                onSeekToMs = player::seekToMs,
+                onToggleShuffle = player::toggleShuffle,
+                onCycleRepeat = player::cycleRepeat,
+                onToggleFavorite = { playerState.current?.let(libraryVm::toggleFavorite) },
+                onToggleLyrics = playerVm::toggleLyrics,
+                onAddToPlaylist = { playerState.current?.let(libraryVm::openPlaylistPicker) },
+                onDownload = { playerState.current?.let(libraryVm::downloadTrack) },
+                onOpenQueue = libraryVm::openQueue,
+                onPlayQueueTrack = player::playQueueTrack,
+                onOpenArtist = openArtist,
+                onShare = { playerState.current?.let(shareTrack) },
+                onOpenMenu = { playerState.current?.let(libraryVm::openMenu) },
+                onSetRemix = { speed, pitch, linked, reverb, bass ->
+                    player.setPlaybackRemix(speed, pitch, linked)
+                    player.setReverb(reverb)
+                    player.setBassBoost(bass)
+                },
+                onSaveSpeedPreset = { speed, pitch, linked, reverb, bass ->
+                    snackbarScope.launch {
+                        val cur = parseCustomPrefs(app.settings.settings.first().customPrefs)
+                        val updated = cur.copy(
+                            playbackSpeed = speed,
+                            playbackPitch = pitch,
+                            pitchShiftLinked = linked,
+                            reverbPreset = reverb,
+                            bassBoost = bass,
+                        )
+                        app.settings.setCustomPrefs(updated.toJson())
+                        player.setPlaybackRemix(speed, pitch, linked)
+                        player.setReverb(reverb)
+                        player.setBassBoost(bass)
+                        val name = when {
+                            reverb != "none" && speed < 1f -> "Slowed + Reverb"
+                            linked && speed > 1.1f -> "Nightcore"
+                            reverb != "none" -> context.getString(R.string.remix_reverb_value, reverb)
+                            else -> String.format(java.util.Locale.US, "%.2f×", speed)
+                        }
+                        snackbar.showSnackbar(context.getString(R.string.remix_preset_saved, name))
+                    }
+                },
+                initialEqualizerPreset = cp.equalizerPreset,
+                initialEqualizerBands = cp.equalizerBands,
+                onEqualizerChange = { bands ->
+                    player.setEqualizerBands(bands)
+                },
+                onSaveEqualizer = { bands, preset ->
+                    snackbarScope.launch {
+                        val cur = parseCustomPrefs(app.settings.settings.first().customPrefs)
+                        val bandsStr = bands.joinToString(",") { String.format(java.util.Locale.US, "%.1f", it) }
+                        val updated = cur.copy(
+                            equalizerPreset = preset,
+                            equalizerBands = bandsStr,
+                        )
+                        app.settings.setCustomPrefs(updated.toJson())
+                        player.setEqualizerBands(bands)
+                    }
+                },
+            )
+        }
+    }
+}
+
+    // ---- Global sheets ----
+
+    menu?.let { m ->
+        TrackMenuSheet(
+            track = m.track,
+            isFavorite = favoriteIds.contains(m.track.id),
+            playlistId = m.playlistId,
+            onDismiss = libraryVm::closeMenu,
+            onToggleFavorite = {
+                libraryVm.toggleFavorite(m.track)
+                libraryVm.closeMenu()
+            },
+            onPlayNext = {
+                libraryVm.playNext(m.track)
+                libraryVm.closeMenu()
+            },
+            onAddToQueue = {
+                libraryVm.addToQueue(listOf(m.track))
+                libraryVm.closeMenu()
+            },
+            onAddToPlaylist = { libraryVm.openPlaylistPicker(m.track) },
+            onRemoveFromPlaylist = {
+                m.playlistId?.let { libraryVm.removeFromPlaylist(it, m.track.id) }
+                libraryVm.closeMenu()
+            },
+            onOpenArtist = { openArtist(m.track.artist) },
+            downloaded = m.downloaded,
+            onDownload = {
+                libraryVm.downloadTrack(m.track)
+                libraryVm.closeMenu()
+            },
+            onRemoveDownload = {
+                libraryVm.removeDownload(m.track)
+                libraryVm.closeMenu()
+            },
+        )
+    }
+
+    picker?.let { track ->
+        PlaylistPickerSheet(
+            track = track,
+            playlists = playlists,
+            onDismiss = libraryVm::closePlaylistPicker,
+            onPick = { p -> libraryVm.addToPlaylist(p.id, track) },
+            onCreate = { name -> libraryVm.createPlaylist(name, thenAdd = track) },
+        )
+    }
+
+    if (queueOpen) {
+        QueueSheet(
+            queue = playerState.queue,
+            currentIndex = playerState.currentIndex,
+            onDismiss = libraryVm::closeQueue,
+            onPick = { i ->
+                libraryVm.skipToQueueItem(i)
+                libraryVm.closeQueue()
+            },
+        )
+    }
+
+    // First launch: offer to sign in or continue as a guest (shown once).
+    if (!parseCustomPrefs(settings.customPrefs).welcomeDone) {
+        val rootContext = androidx.compose.ui.platform.LocalContext.current
+        val rootScope = androidx.compose.runtime.rememberCoroutineScope()
+        WelcomeOverlay(
+            onSignIn = {
+                settingsVm.updatePrefs { it.copy(welcomeDone = true) }
+                navController.navigate(Routes.ACCOUNT) { launchSingleTop = true }
+            },
+            onGoogleSignIn = {
+                val state = accountVm.state.value
+                val gmsOk = com.google.android.gms.common.GoogleApiAvailability.getInstance()
+                    .isGooglePlayServicesAvailable(rootContext) ==
+                    com.google.android.gms.common.ConnectionResult.SUCCESS
+                if (!gmsOk) {
+                    android.util.Log.w("VotifyRoot", "Google Play Services not available")
+                } else {
+                    rootScope.launch {
+                        runCatching {
+                            val cm = androidx.credentials.CredentialManager.create(rootContext)
+                            val option = com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+                                .Builder(state.googleClientId)
+                                .build()
+                            val result = cm.getCredential(
+                                rootContext,
+                                androidx.credentials.GetCredentialRequest(listOf(option)),
+                            )
+                            val cred = result.credential
+                            if (cred is androidx.credentials.CustomCredential &&
+                                cred.type == com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                            ) {
+                                com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.createFrom(cred.data).idToken
+                            } else null
+                        }.onSuccess { token ->
+                            if (token != null) {
+                                accountVm.googleSignIn(token)
+                                settingsVm.updatePrefs { it.copy(welcomeDone = true) }
+                            }
+                        }.onFailure { e ->
+                            if (e !is androidx.credentials.exceptions.GetCredentialCancellationException) {
+                                android.util.Log.e("VotifyRoot", "Google login failed: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            },
+            onGuest = { settingsVm.updatePrefs { it.copy(welcomeDone = true) } },
+            onRegister = { email, uname, pass ->
+                accountVm.register(email, uname, pass)
+            },
+            onRegisterSuccess = {
+                settingsVm.updatePrefs { it.copy(welcomeDone = true) }
+            },
+            onImport = {
+                settingsVm.updatePrefs { it.copy(welcomeDone = true) }
+                navController.navigate(Routes.IMPORT) { launchSingleTop = true }
+            },
+            accountVm = accountVm,
+        )
+    }
+}
+
+/** Nav bar: clean bottom dock row matching rize-mobile.html (.bottom-nav). */
+@Composable
+private fun VotifyNavBar(
+    selected: Tab,
+    onSelect: (Tab) -> Unit,
+    cp: app.votify.mobile.data.CustomPrefs,
+    hazeState: HazeState,
+) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val tabs = Tab.entries
+    val isDark = LocalVotifyPalette.current.isDark
+    val spec = cp.toGlassSpec()
+    val isGlass = spec.enabled && spec.alphaFraction > 0.05f
+    val navShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+    val solidBgColor = if (isDark) {
+        if (cp.themeName == "amoled" || cp.themeName == "oled") Color(0xFF000000) else Color(0xFF141417)
+    } else {
+        Color(0xFFFFFFFF)
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isGlass) {
+                    val tintBase = if (isDark) Color(0xFF08090C) else Color(0xFFF2F4F7)
+                    Modifier
+                        .hazeChild(
+                            state = hazeState,
+                            shape = navShape,
+                            style = dev.chrisbanes.haze.HazeStyle(
+                                tint = tintBase.copy(alpha = spec.tintAlpha),
+                                blurRadius = spec.effectiveBlurDp.dp,
+                                noiseFactor = 0f,
+                            ),
+                        )
+                        .background(
+                            color = tintBase.copy(alpha = (1f - spec.alphaFraction) * 0.40f),
+                            shape = navShape,
+                        )
+                } else {
+                    Modifier
+                }
+            ),
+        shape = navShape,
+        color = if (isGlass) Color.Transparent else solidBgColor,
+        border = null,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .height(60.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.forEach { tab ->
+                val isSelected = tab == selected
+                val interactionSource = remember { MutableInteractionSource() }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .pressBounce(interactionSource, pressedScale = 0.86f)
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = null,
+                        ) {
+                            VotifyHaptics.click(view, context)
+                            onSelect(tab)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val iconTint = if (isSelected) {
+                        if (isDark) Color.White else Color(0xFF111215)
+                    } else {
+                        if (isDark) Color(0xFF888E96) else Color(0xFF9CA3AF)
+                    }
+                    Icon(
+                        painter = painterResource(if (isSelected) tab.iconSelected else tab.icon),
+                        contentDescription = stringResource(tab.label),
+                        tint = iconTint,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Builds our ViewModels with the app-scoped singletons. */
+private class AppViewModelFactory(private val app: VotifyApp) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = when {
+        modelClass.isAssignableFrom(HomeViewModel::class.java) -> HomeViewModel(app.music, app.library, app.applicationContext) as T
+        modelClass.isAssignableFrom(SearchViewModel::class.java) -> SearchViewModel(app.music) as T
+        modelClass.isAssignableFrom(LibraryViewModel::class.java) -> LibraryViewModel(app.library, app.player, app.music, app.applicationContext, app.settings) as T
+        modelClass.isAssignableFrom(PlayerViewModel::class.java) -> PlayerViewModel(app.music, app.player, app.library) as T
+        modelClass.isAssignableFrom(ArtistViewModel::class.java) -> ArtistViewModel(app.music, app.library) as T
+        modelClass.isAssignableFrom(SettingsViewModel::class.java) -> SettingsViewModel(app.api, app.settings, app.library, app) as T
+        modelClass.isAssignableFrom(AccountViewModel::class.java) -> AccountViewModel(app.api, app.settings, app.music) as T
+        modelClass.isAssignableFrom(ImportViewModel::class.java) -> ImportViewModel(app.music, app.library) as T
+        modelClass.isAssignableFrom(TrendingViewModel::class.java) -> TrendingViewModel(app.music) as T
+        modelClass.isAssignableFrom(WorkshopViewModel::class.java) -> WorkshopViewModel(app.settings, app.api, app.music, app.applicationContext) as T
+        modelClass.isAssignableFrom(ProfileViewModel::class.java) ->
+            ProfileViewModel(app.settings, app.database, app.applicationContext, app.player) as T
+        modelClass.isAssignableFrom(FriendsViewModel::class.java) -> FriendsViewModel(app.settings, app.applicationContext) as T
+        else -> throw IllegalArgumentException("Unknown ViewModel: ${modelClass.name}")
+    }
+}

@@ -1,0 +1,67 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+release/
+target/
+src-tauri/target/
+
+# Environment files
+*.env
+*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+*.tmp
+*.temp
+
+# Local data
+*.json
+!package.json
+!package-lock.json
+!firebase.json
+!tsconfig.json
+!*.config.js
+!*.rc.js
+!src-tauri/**/*.json
+!src-tauri/*.json
+
+# Service keys (keep locally, don't commit)
+supabase-service-key.json
+firebase-config.json
+firebase-service-account.json
+
+# Temporary and backup files
+.trae/
+nohup.out
+rize-open-source
+bin/yt-dlp
+bin/yt-dlp.exe
+repomix-output.xml
+src-legacy-backup/
+riff-source/
+
+# Binaries (Windows build is downloaded by `npm install` via scripts/download-ytdlp.js)
+*.exe
+*.blockmap
+bin/yt-dlp.exe
+logs/
+scratch/
+videos/
+real-app*.png
+RIZE.apk
+RIZE.AppImage

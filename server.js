@@ -1,0 +1,499 @@
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const cryptoMod = require('crypto');
+const {
+  sendJson,
+  serveStatic,
+  parseBody,
+  saveNetworkConfig,
+  getNetworkConfig,
+  getLanAddresses,
+  STATIC_MIME_TYPES,
+} = require('./routes/utils.js');
+const { handleAuthRoutes } = require('./routes/auth.js');
+const { handleMusicRoutes } = require('./routes/music.js');
+const { handlePlaylistRoutes } = require('./routes/playlists.js');
+const { handleSmtpRoutes } = require('./routes/smtp.js');
+const { handleSyncRoutes } = require('./routes/sync.js');
+const { handleCoarenaRoutes } = require('./routes/coarena.js');
+const { DiscordPresence } = require('./discord-presence.js');
+
+let discordPresence = null;
+try {
+  discordPresence = new DiscordPresence({
+    clientId: process.env.RIZE_DISCORD_CLIENT_ID || process.env.VOTIFY_DISCORD_CLIENT_ID || '1536826368615256146',
+    applicationName: 'RIZE',
+    fallbackImageKey: process.env.RIZE_DISCORD_LARGE_IMAGE_KEY || process.env.VOTIFY_DISCORD_LARGE_IMAGE_KEY,
+  });
+} catch (e) {
+  /* discord optional */
+}
+
+let riffPort = 38472;
+let riffStarted = false;
+if (!process.env.NODE_TEST_CONTEXT && process.env.NODE_ENV !== 'test') {
+  try {
+    const riffServer = require('./riff-source/server.js');
+    riffServer.startServer(38472).then(p => {
+      riffPort = p;
+      riffStarted = true;
+      console.log(`[Riff API] Internal server running on port ${p}`);
+    }).catch(e => {
+      console.warn('[Riff API start warning]:', e.message);
+    });
+  } catch (e) {
+    // riff-source optional
+  }
+}
+
+const PKG_VERSION = (() => {
+  try {
+    return require('./package.json').version || '0.0.0';
+  } catch (e) {
+    return '0.0.0';
+  }
+})();
+
+if (process.platform === 'linux') {
+  try {
+    const { integrateLinuxAppImage } = require('./desktop-integration.js');
+    integrateLinuxAppImage();
+  } catch (_) {}
+}
+
+const FIREBASE_CONFIG_FIELDS = [
+  'apiKey',
+  'authDomain',
+  'projectId',
+  'storageBucket',
+  'messagingSenderId',
+  'appId',
+];
+const FIREBASE_VENDOR_FILES = {
+  '/vendor/firebase-app-compat.js': 'firebase-app-compat.js',
+  '/vendor/firebase-auth-compat.js': 'firebase-auth-compat.js',
+  '/vendor/firebase-firestore-compat.js': 'firebase-firestore-compat.js',
+  '/vendor/firebase-app-compat.js.map': 'firebase-app-compat.js.map',
+  '/vendor/firebase-auth-compat.js.map': 'firebase-auth-compat.js.map',
+  '/vendor/firebase-firestore-compat.js.map': 'firebase-firestore-compat.js.map',
+};
+
+function loadFirebaseConfig() {
+  let rawConfig = null;
+  if (process.env.VOTIFY_FIREBASE_CONFIG) {
+    rawConfig = JSON.parse(process.env.VOTIFY_FIREBASE_CONFIG);
+  } else {
+    const configPath = path.join(__dirname, 'firebase-config.json');
+    if (fs.existsSync(configPath)) rawConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  }
+  if (!rawConfig) return null;
+  if (rawConfig.private_key || rawConfig.privateKey || rawConfig.type === 'service_account') {
+    throw new Error('Service Account JSON cannot be used as Firebase Web Config');
+  }
+  const config = {};
+  FIREBASE_CONFIG_FIELDS.forEach(field => {
+    if (rawConfig[field]) config[field] = String(rawConfig[field]);
+  });
+  const required = ['apiKey', 'authDomain', 'projectId', 'appId'];
+  if (required.some(field => !config[field])) throw new Error('Incomplete Firebase Web Config');
+  return config;
+}
+
+function serveFirebaseVendor(pathname, res) {
+  const filename = FIREBASE_VENDOR_FILES[pathname];
+  if (!filename) return false;
+  const fullPath = path.join(__dirname, 'node_modules', 'firebase', filename);
+  try {
+    const data = fs.readFileSync(fullPath);
+    res.writeHead(200, {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+    res.end(data);
+  } catch (error) {
+    sendJson(res, 500, { error: `Firebase SDK is unavailable: ${error.message}` });
+  }
+  return true;
+}
+
+function setCorsHeaders(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Range');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length');
+}
+
+/**
+ * Необязательный пароль на весь сервер: VOTIFY_BASIC_AUTH="логин:пароль".
+ * Для доступа из интернета нужен обязательно — иначе любой, кто узнал адрес,
+ * сможет искать и качать музыку через ваш yt-dlp. Для домашней Wi-Fi сети можно не задавать.
+ */
+const BASIC_AUTH = (process.env.VOTIFY_BASIC_AUTH || '').trim();
+
+function basicAuthOk(req) {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Basic ')) return false;
+  let decoded = '';
+  try {
+    decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
+  } catch (e) {
+    return false;
+  }
+  const a = Buffer.from(decoded);
+  const b = Buffer.from(BASIC_AUTH);
+  return a.length === b.length && cryptoMod.timingSafeEqual(a, b);
+}
+
+const server = http.createServer(async (req, res) => {
+  setCorsHeaders(res);
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  const u = new URL(req.url, `http://${req.headers.host}`);
+
+  // Health-проверка: её дергают docker/Render и Android-приложение («Свой сервер»),
+  // поэтому она доступна без пароля и отвечает быстро. Никаких данных не отдаёт.
+  if (u.pathname === '/api/health') {
+    sendJson(res, 200, { ok: true, name: 'RIZE', version: PKG_VERSION });
+    return;
+  }
+
+  // Пароль (если задан) спрашиваем у всего: и у страниц, и у API, и у потока.
+  // Браузер запоминает его сам, ярлык на экране «Домой» продолжает работать.
+  if (BASIC_AUTH && !basicAuthOk(req)) {
+    res.writeHead(401, {
+      'WWW-Authenticate': 'Basic realm="RIZE", charset="UTF-8"',
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+    res.end('RIZE: нужен логин и пароль');
+    return;
+  }
+
+  try {
+    if (u.pathname === '/api/dev-command' && req.method === 'POST') {
+      const body = await parseBody(req);
+      if (!global.__devCommands) global.__devCommands = [];
+      global.__devCommands.push(body);
+      sendJson(res, 200, { ok: true, queued: global.__devCommands.length });
+      return;
+    }
+    if (u.pathname === '/api/dev-command' && req.method === 'GET') {
+      const cmds = global.__devCommands ? [...global.__devCommands] : [];
+      global.__devCommands = [];
+      sendJson(res, 200, { ok: true, commands: cmds });
+      return;
+    }
+    if (u.pathname === '/api/debug-log' && req.method === 'POST') {
+      const body = await parseBody(req);
+      console.log('=== [RENDERER DEBUG LOG] ===\n', JSON.stringify(body, null, 2));
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (u.pathname === '/api/discord-presence' && req.method === 'POST') {
+      const body = await parseBody(req);
+      if (discordPresence) {
+        if (body && body.action === 'clear') {
+          discordPresence.clear();
+        } else if (body && body.playback) {
+          discordPresence.update(body.playback);
+        }
+      }
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (u.pathname === '/api/launcher/install' && (req.method === 'POST' || req.method === 'GET')) {
+      const scriptPath = path.join(__dirname, 'scripts', 'update-desktop-shortcut.sh');
+      if (fs.existsSync(scriptPath)) {
+        const { execFile } = require('child_process');
+        execFile('bash', [scriptPath], (err, stdout) => {
+          if (err) {
+            console.error('[launcher] install error:', err);
+            sendJson(res, 500, { success: false, error: err.message });
+          } else {
+            console.log('[launcher] desktop shortcut updated successfully');
+            sendJson(res, 200, { success: true, stdout });
+          }
+        });
+      } else {
+        sendJson(res, 200, { success: true, noop: true });
+      }
+      return;
+    }
+    if (serveFirebaseVendor(u.pathname, res)) return;
+
+    // Корень — редирект на уникальный URL: ломает любые кэши прокси/браузера,
+    // чтобы превью всегда получало свежий index.html и свежие ассеты
+    if (u.pathname === '/' && req.method === 'GET') {
+      res.writeHead(302, {
+        Location: '/index.html?ts=' + Date.now(),
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        Pragma: 'no-cache',
+      });
+      res.end();
+      return;
+    }
+
+    // --- NETWORK ENDPOINTS ---
+    // Адрес для ярлыка на телефоне: тот же сервер, но по IP в локальной сети.
+    if (u.pathname === '/api/network/lan' && req.method === 'GET') {
+      const hostPort =
+        Number((req.headers.host || '').split(':')[1]) ||
+        Number(process.env.VOTIFY_PORT || process.env.PORT) ||
+        17217;
+      sendJson(res, 200, {
+        port: hostPort,
+        addresses: getLanAddresses().map(ip => `http://${ip}:${hostPort}`),
+      });
+      return;
+    }
+    if (u.pathname === '/api/network/settings' && req.method === 'GET') {
+      sendJson(res, 200, getNetworkConfig());
+      return;
+    }
+    if (u.pathname === '/api/network/settings' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const updatedConfig = saveNetworkConfig(body);
+      sendJson(res, 200, { updated: true, config: updatedConfig });
+      return;
+    }
+
+    // --- SYNC ENDPOINTS ---
+    if (await handleSyncRoutes(req, res, u)) return;
+
+    // --- AUTH ENDPOINTS ---
+    if (await handleAuthRoutes(req, res, u)) return;
+
+    // --- SMTP CONFIG ---
+    if (await handleSmtpRoutes(req, res, u)) return;
+
+    // --- COARENA AI ENDPOINTS ---
+    if (await handleCoarenaRoutes(req, res, u)) return;
+
+    // --- PUBLIC PLAYLISTS ---
+    if (await handlePlaylistRoutes(req, res, u)) return;
+
+    // --- MUSIC ENDPOINTS ---
+    if (await handleMusicRoutes(req, res, u)) return;
+
+    // --- DEMO (offline catalog covers/audio) ---
+    if (require('./routes/demo.js').handleDemoRoutes(req, res, u)) return;
+
+    // --- LOCAL MEDIA ENDPOINT (custom backgrounds & local assets) ---
+    if ((u.pathname === '/api/local-media' || u.pathname === '/api/local-file') && (req.method === 'GET' || req.method === 'HEAD')) {
+      const requestedFile = u.searchParams.get('file') || u.searchParams.get('path');
+      if (!requestedFile) {
+        sendJson(res, 400, { error: 'Missing file parameter' });
+        return;
+      }
+
+      let decodedPath = '';
+      try {
+        decodedPath = decodeURIComponent(requestedFile);
+      } catch (_) {
+        decodedPath = requestedFile;
+      }
+
+      if (decodedPath.startsWith('file://')) {
+        try {
+          decodedPath = decodeURIComponent(new URL(decodedPath).pathname);
+          if (process.platform === 'win32' || /^\/[a-zA-Z]:/.test(decodedPath)) {
+            decodedPath = decodedPath.replace(/^\//, '');
+          }
+        } catch (_) {
+          decodedPath = decodedPath.replace(/^file:\/\//, '');
+          if (/^\/[a-zA-Z]:/.test(decodedPath)) decodedPath = decodedPath.replace(/^\//, '');
+        }
+      }
+
+      const resolvedPath = path.resolve(decodedPath);
+      let stat;
+      try {
+        stat = await fs.promises.stat(resolvedPath);
+      } catch (err) {
+        sendJson(res, 404, { error: 'File not found: ' + err.message });
+        return;
+      }
+
+      if (!stat.isFile()) {
+        sendJson(res, 400, { error: 'Target is not a file' });
+        return;
+      }
+
+      const ext = path.extname(resolvedPath).toLowerCase();
+      const MEDIA_MIMES = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.bmp': 'image/bmp',
+        '.svg': 'image/svg+xml',
+        '.ico': 'image/x-icon',
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.ogg': 'video/ogg',
+        '.ogv': 'video/ogg',
+        '.mov': 'video/quicktime',
+        '.m4v': 'video/mp4',
+        '.mp3': 'audio/mpeg',
+        '.flac': 'audio/flac',
+        '.wav': 'audio/wav',
+      };
+      const contentType = MEDIA_MIMES[ext] || (STATIC_MIME_TYPES && STATIC_MIME_TYPES[ext]) || 'application/octet-stream';
+      const fileSize = stat.size;
+      const range = req.headers.range;
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+        if (isNaN(start) || isNaN(end) || start >= fileSize || end >= fileSize || start > end) {
+          res.writeHead(416, {
+            'Content-Range': `bytes */${fileSize}`,
+          });
+          res.end();
+          return;
+        }
+
+        const chunkSize = (end - start) + 1;
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Content-Length': chunkSize,
+        });
+        if (req.method === 'HEAD') {
+          res.end();
+          return;
+        }
+        const stream = fs.createReadStream(resolvedPath, { start, end });
+        stream.on('error', () => {
+          if (!res.headersSent) res.writeHead(500);
+          res.end();
+        });
+        stream.pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Length': fileSize,
+        });
+        if (req.method === 'HEAD') {
+          res.end();
+          return;
+        }
+        const stream = fs.createReadStream(resolvedPath);
+        stream.on('error', () => {
+          if (!res.headersSent) res.writeHead(500);
+          res.end();
+        });
+        stream.pipe(res);
+      }
+      return;
+    }
+
+    // --- RIFF PORT ENDPOINT ---
+    if (u.pathname === '/api/riff-port' && req.method === 'GET') {
+      let token = '';
+      try {
+        const riffServer = require('./riff-source/server.js');
+        if (typeof riffServer.getServerToken === 'function') token = riffServer.getServerToken();
+      } catch (e) {}
+      sendJson(res, 200, { port: port, token: token });
+      return;
+    }
+
+    // --- RIFF BACKEND PROXY (for search, lyrics, stream-info, vibe, etc.) ---
+    if (riffStarted && u.pathname.startsWith('/api/')) {
+      let token = '';
+      try {
+        const riffServer = require('./riff-source/server.js');
+        if (typeof riffServer.getServerToken === 'function') token = riffServer.getServerToken();
+      } catch (e) {}
+
+      const proxyHeaders = {
+        ...req.headers,
+        host: `127.0.0.1:${riffPort}`,
+        ...(token ? { 'x-riff-token': token } : {})
+      };
+      if (proxyHeaders.origin) {
+        proxyHeaders.origin = 'http://127.0.0.1';
+      }
+
+      const proxyReq = http.request({
+        hostname: '127.0.0.1',
+        port: riffPort,
+        path: req.url,
+        method: req.method,
+        headers: proxyHeaders
+      }, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res);
+      });
+      proxyReq.on('error', (err) => {
+        sendJson(res, 502, { error: 'Riff internal server unreachable: ' + err.message });
+      });
+      req.pipe(proxyReq);
+      return;
+    }
+
+    // --- STATIC FILES ---
+    await serveStatic(u.pathname, res);
+  } catch (e) {
+    sendJson(res, 500, { error: String(e.message || e) });
+  }
+});
+
+const port = Number(process.env.VOTIFY_PORT || process.env.PORT || 17217);
+
+const isTestEnv = !!process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === 'test';
+
+if (!isTestEnv) {
+  server.on('error', err => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`Port ${port} busy, retrying...`);
+      setTimeout(() => {
+        try {
+          server.listen(port, '0.0.0.0');
+        } catch (e) {
+          // ignore port retry errors
+        }
+      }, 2000);
+    } else {
+      console.error('Server error:', err.message);
+    }
+  });
+
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`RIZE server running at http://0.0.0.0:${port}`);
+    // Ярлык на телефоне: этот же адрес, но по IP в локальной сети.
+    getLanAddresses().forEach(ip => console.log(`RIZE на телефоне: http://${ip}:${port}`));
+    if (!process.env.VOTIFY_PORT) {
+      try {
+        const { exec } = require('child_process');
+        const url = `http://127.0.0.1:${port}`;
+        const isWindows = process.platform === 'win32';
+        const isMac = process.platform === 'darwin';
+        const cmd = isWindows ? `start ${url}` : isMac ? `open ${url}` : `xdg-open ${url}`;
+        exec(cmd);
+      } catch (e) {
+        // ignore browser open errors
+      }
+    }
+  });
+}
+
+process.on('uncaughtException', err => {
+  console.error('Uncaught:', err.message);
+});
+process.on('unhandledRejection', err => {
+  console.error('Unhandled rejection:', err?.message || err);
+});
+
+module.exports = server;

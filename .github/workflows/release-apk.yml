@@ -1,0 +1,141 @@
+name: Release APK
+
+# Rolling pre-release tagged `android-debug`: every build replaces the APK so the
+# download link stays the same — https://github.com/exieeez/Votify/releases/download/android-debug/Votify-debug.apk
+on:
+  push:
+    branches: ['pc', 'mobile', 'android', 'main', 'arena/**']
+    paths: ['android/**', '.github/workflows/release-apk.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: release-apk-global
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Firebase Web Config injected into BuildConfig at build time (from a secret,
+    # never committed; masked out of logs automatically).
+    env:
+      VOTIFY_FIREBASE_CONFIG: ${{ secrets.VOTIFY_FIREBASE_CONFIG }}
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+
+      # Single build. Package id comes from OriginOS' dynamic-island whitelist (see
+      # build.gradle.kts): the island only renders apps hardcoded in the OS. vivo's
+      # i管家 signature-pins famous packages (com.apple.android.music got blocked as a
+      # «counterfeit app»), so we ship under an obscure whitelisted player id.
+      # RELEASE variant (stable signing): debug Compose builds render noticeably slower —
+      # release is the fix for the «app feels like it's not running at 120 Hz» reports.
+      # Kept under the permanent Votify-debug.apk release link.
+      - name: Build release APK (OriginOS island package)
+        run: |
+          ./gradlew --no-daemon --console=plain assembleRelease -PvotifyIslandPackage=com.hiby.music -PvotifyRunNumber=${{ github.run_number }}
+          cp app/build/outputs/apk/release/app-release.apk RIZE-debug.apk
+          cp RIZE-debug.apk Votify-debug.apk
+
+      # Постоянное зеркало: APK кладётся в отдельную ветку «apk». Оттуда он качается
+      # с других хостов (raw.githubusercontent, jsDelivr) — release-канал GitHub у части
+      # провайдеров виснет на 100%, а зеркала на catbox/gofile живут только 72 часа.
+      - name: Mirror APK and Publish
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          APK="android/RIZE-debug.apk"
+          ls -la "$APK"
+
+          # Upload to 72h external mirrors
+          mirror() {
+            curl -sf -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@$1" \
+              https://litterbox.catbox.moe/resources/internals/api.php || true
+          }
+          LB_DEBUG=$(mirror "$APK")
+          GF_DEBUG=$(curl -sf -F "file=@$APK" https://upload.gofile.io/uploadFile | jq -r '.data.downloadPage // empty' 2>/dev/null || true)
+          echo "Litterbox URL: $LB_DEBUG"
+
+          rm -rf /tmp/apkmirror && mkdir -p /tmp/apkmirror && cd /tmp/apkmirror
+          git init -q -b apk
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          cp "$GITHUB_WORKSPACE/$APK" RIZE-debug.apk
+          cp "$GITHUB_WORKSPACE/$APK" Votify-debug.apk
+          {
+            echo "Зеркало APK RIZE (обновляется каждой сборкой)."
+            echo
+            echo "Ссылки для скачивания:"
+            echo "- https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/apk/RIZE-debug.apk"
+            echo "- https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@apk/RIZE-debug.apk"
+            echo "- https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/apk/Votify-debug.apk"
+            echo
+            echo "Сборка: ${GITHUB_SHA}"
+          } > README.md
+          RUN_NUM=${{ github.run_number }}
+          V_CODE=$((1000 + RUN_NUM))
+          V_NAME="1.2.1"
+          cat <<EOF > version.json
+          {
+            "versionCode": $V_CODE,
+            "versionName": "$V_NAME",
+            "sha": "${GITHUB_SHA}",
+            "shortSha": "${GITHUB_SHA:0:7}",
+            "mirrorUrl": "${LB_DEBUG}",
+            "downloadUrl": "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/apk/RIZE-debug.apk",
+            "cdnUrl": "https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@apk/RIZE-debug.apk",
+            "releaseUrl": "https://github.com/${GITHUB_REPOSITORY}/releases/download/android-debug/RIZE-debug.apk"
+          }
+          EOF
+          git add -A
+          git commit -q -m "APK: сборка ${GITHUB_SHA:0:8}"
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git"
+          git push -f origin apk
+          echo "зеркало обновлено: ветка apk"
+
+          # Purge jsDelivr cache so CDN never serves an old APK or stale version.json
+          curl -sf "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@apk/RIZE-debug.apk" || true
+          curl -sf "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@apk/Votify-debug.apk" || true
+          curl -sf "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@apk/version.json" || true
+
+          # Publish to GitHub Release
+          cd "$GITHUB_WORKSPACE/android"
+          cp /tmp/apkmirror/version.json version.json
+          TAG="android-debug"
+          {
+            echo "Автосборка APK из ветки $GITHUB_REF_NAME (коммит $GITHUB_SHA)."
+            echo
+            echo "Единая сборка с package id из вайтлиста «островка» OriginOS (com.hiby.music) — трек показывается в Dynamic Spot как у Spotify. Для Google-входа добавьте в Firebase это Android-приложение (пакет com.hiby.music, SHA-1 8D:A3:BC:F4:59:CF:30:C9:54:EE:F6:51:98:6B:80:27:36:DC:50:7A)."
+            echo
+            echo "Сервер (опционально): Настройки → Интеграции → Прокси → адрес http://<IP-вашего-ПК>:17217"
+            echo
+            echo "Если скачивание с GitHub виснет — берите тот же APK с зеркал:"
+            echo "• постоянное: https://raw.githubusercontent.com/$GITHUB_REPOSITORY/apk/RIZE-debug.apk"
+            echo "• постоянное (CDN, обычно быстрее всего): https://cdn.jsdelivr.net/gh/$GITHUB_REPOSITORY@apk/RIZE-debug.apk"
+            echo "• зеркало Votify: https://raw.githubusercontent.com/$GITHUB_REPOSITORY/apk/Votify-debug.apk"
+            if [ -n "$LB_DEBUG" ] || [ -n "$GF_DEBUG" ]; then
+              echo "• на 72 часа (обновляется каждой сборкой):"
+              [ -n "$LB_DEBUG" ] && echo "   - $LB_DEBUG"
+              [ -n "$GF_DEBUG" ] && echo "   - $GF_DEBUG"
+            fi
+          } > notes.md
+
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            && gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
+            || true
+          gh release create "$TAG" "RIZE-debug.apk" "Votify-debug.apk" "version.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "RIZE Android — свежая debug-сборка (1.2.1)" \
+            --notes-file notes.md \
+            --prerelease

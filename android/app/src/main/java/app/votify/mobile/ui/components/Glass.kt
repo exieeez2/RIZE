@@ -1,0 +1,132 @@
+package app.votify.mobile.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.dp
+import app.votify.mobile.data.CustomPrefs
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.hazeChild
+
+/**
+ * ОБЩЕЕ СТЕКЛО ДЛЯ ВСЕГО ПРИЛОЖЕНИЯ.
+ *
+ * Раньше нижняя панель и интерфейс настраивались раздельно: панель брала
+ * navBarAlpha/navBarBlur и умела настоящее размытие (haze), а карточки брали
+ * cardsAlpha/cardsBlur и рисовали просто полупрозрачный градиент без блюра —
+ * поэтому в интерфейсе был виден «только цвет», а не матовое стекло.
+ *
+ * Теперь есть одна формула ([GlassSpec]) и один источник размытия ([LocalHazeState]),
+ * общие для панели и для всех поверхностей интерфейса.
+ */
+
+/** Общее состояние размытия: источник — слой обоев, потребители — стеклянные поверхности. */
+val LocalHazeState = compositionLocalOf<HazeState?> { null }
+
+/**
+ * Единый базовый тон стекла — тот же, что у нижней панели.
+ * Благодаря этому кнопки, пилюли и панели выглядят одним материалом.
+ */
+val GlassBaseColor: Color = Color(0xFF101012)
+
+/**
+ * ЕДИНАЯ формула стекла — одна и та же для нижней панели и для интерфейса.
+ *
+ * @param enabled включён ли режим Liquid Glass
+ * @param alphaFraction прозрачность 0..1 (1 — самое прозрачное стекло)
+ * @param blurDp запрошенная сила размытия 0..60 dp
+ */
+data class GlassSpec(
+    val enabled: Boolean,
+    val alphaFraction: Float,
+    val blurDp: Int,
+    val glassType: String = "balance",
+) {
+    /** Тон матового стекла поверх размытого фона с учётом типа стекла. */
+    val tintAlpha: Float
+        get() = when {
+            !enabled -> 1f
+            glassType == "frosted" -> (0.32f + (1f - alphaFraction) * 0.42f).coerceIn(0.25f, 0.75f)
+            glassType == "vivid" -> (0.22f + (1f - alphaFraction) * 0.35f).coerceIn(0.18f, 0.60f)
+            glassType == "clear" -> ((1f - alphaFraction) * 0.28f).coerceIn(0.08f, 0.35f)
+            else -> ((1f - alphaFraction) * 0.45f).coerceIn(0.10f, 0.50f)
+        }
+
+    /**
+     * Прозрачное стекло без блюра вырождается в плоскую заливку цветом.
+     * Сила размытия адаптируется под запрошенный тип стекла и ползунок.
+     */
+    val effectiveBlurDp: Int
+        get() = when {
+            !enabled -> 0
+            glassType == "frosted" -> (blurDp * 1.35f).toInt().coerceIn(24, 60)
+            glassType == "clear" -> (blurDp * 0.9f).toInt().coerceIn(16, 50)
+            blurDp > 0 -> blurDp
+            alphaFraction > 0f -> 22
+            else -> 0
+        }
+
+    /** Тонкая светлая кромка стекла. */
+    val borderAlpha: Float get() = (0.05f + alphaFraction * 0.07f).coerceIn(0.04f, 0.12f)
+}
+
+/** Собирает [GlassSpec] из переданных настроек (без чтения CompositionLocal). */
+fun CustomPrefs.toGlassSpec(): GlassSpec = GlassSpec(
+    enabled = glassEnabled,
+    alphaFraction = if (glassEnabled) (glassAlpha.coerceIn(0, 100) / 100f) else 0f,
+    blurDp = glassBlur.coerceIn(0, 60),
+    glassType = glassType,
+)
+
+/**
+ * Собирает [GlassSpec] из текущих настроек интерфейса.
+ *
+ * Читает [LocalCustomPrefs], поэтому вызывать только ВНУТРИ провайдера настроек.
+ * Там, где настройки известны напрямую (например при формировании самой палитры),
+ * используйте [toGlassSpec], иначе возьмутся значения по умолчанию.
+ */
+@Composable
+fun rememberGlassSpec(): GlassSpec = LocalCustomPrefs.current.toGlassSpec()
+
+/**
+ * Настоящее матовое стекло: размывает то, что лежит ПОД поверхностью, ровно как
+ * нижняя панель.
+ *
+ * Важно про haze 0.7.x: размывается содержимое узла-источника, а узел с эффектом
+ * не должен быть его потомком. Поэтому источник (слой обоев) лежит рядом, а не
+ * внутри содержимого. Если блюр недоступен (стекло выключено, нет источника или
+ * нулевой радиус) — рисуем плотную заливку, чтобы поверхность не «пропала».
+ */
+@Composable
+fun Modifier.votifyGlass(
+    shape: Shape,
+    baseColor: Color,
+    spec: GlassSpec = rememberGlassSpec(),
+    hazeState: HazeState? = LocalHazeState.current,
+): Modifier {
+    val blurDp = spec.effectiveBlurDp
+    return if (spec.enabled && hazeState != null && blurDp > 0) {
+        this
+            .clip(shape)
+            .hazeChild(
+                state = hazeState,
+                shape = shape,
+                style = HazeStyle(
+                    tint = baseColor.copy(alpha = spec.tintAlpha),
+                    blurRadius = blurDp.dp,
+                    // Иначе haze берёт значение по умолчанию 0.15 и поверх стекла появляется
+                    // заметное зерно — те самые «шумы». 0f убирает зернистость полностью.
+                    noiseFactor = 0f,
+                ),
+            )
+    } else {
+        this
+            .clip(shape)
+            .background(baseColor.copy(alpha = if (spec.enabled) spec.alphaFraction else 1f))
+    }
+}

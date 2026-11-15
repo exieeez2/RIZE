@@ -1,0 +1,45 @@
+[
+  {
+    "id": "pub-top-50",
+    "title": "RIZE Топ 50",
+    "author": "RIZE",
+    "cover": "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80",
+    "description": "Главные хиты и популярные треки недели",
+    "createdAt": 1700000000000,
+    "updatedAt": 1700000000000,
+    "tracks": [
+      {
+        "id": "t-1",
+        "title": "Starboy",
+        "artist": "The Weeknd, Daft Punk",
+        "duration": 230,
+        "cover": "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300"
+      },
+      {
+        "id": "t-2",
+        "title": "Blinding Lights",
+        "artist": "The Weeknd",
+        "duration": 200,
+        "cover": "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300"
+      }
+    ]
+  },
+  {
+    "id": "pub-chill-lofi",
+    "title": "Вечерний Chill & Lo-Fi",
+    "author": "Lo-Fi Lounge",
+    "cover": "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=400&q=80",
+    "description": "Спокойная музыка для работы, учебы и отдыха",
+    "createdAt": 1700000000000,
+    "updatedAt": 1700000000000,
+    "tracks": [
+      {
+        "id": "c-1",
+        "title": "Midnight City Beats",
+        "artist": "Chillhop Music",
+        "duration": 154,
+        "cover": "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=300"
+      }
+    ]
+  }
+]

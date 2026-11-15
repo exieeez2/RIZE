@@ -1,0 +1,784 @@
+const { app, BrowserWindow, shell, ipcMain, Tray, Menu, screen, globalShortcut, dialog } = require('electron');
+const { pathToFileURL } = require('url');
+
+app.setName('RIZE');
+try {
+  process.title = 'rize';
+} catch (e) {
+  // Ignore if unsupported
+}
+if (process.platform === 'win32') {
+  app.setAppUserModelId('app.rize.desktop');
+} else if (process.platform === 'linux') {
+  if (typeof app.setDesktopName === 'function') {
+    app.setDesktopName('rize.desktop');
+  }
+}
+
+// Memory optimizations for Chromium runtime
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
+app.commandLine.appendSwitch('disable-site-isolation-trials');
+
+let autoUpdater = null;
+try {
+  autoUpdater = require('electron-updater').autoUpdater;
+} catch (e) {
+  console.warn('[updater] electron-updater not available:', e.message);
+}
+const path = require('path');
+const http = require('http');
+const { fork } = require('child_process');
+const fs = require('fs');
+const net = require('net');
+const { DiscordPresence } = require('./discord-presence.js');
+const { startGoogleOAuth, isGoogleClientId } = require('./google-oauth.js');
+const { integrateLinuxAppImage } = require('./desktop-integration.js');
+
+let PORT = 17217;
+let mainWindow = null;
+let serverProcess = null;
+let tray = null;
+let closeToTrayEnabled = true;
+let isQuitting = false;
+let googleAuthPromise = null;
+
+const RIZE_DISCORD_CLIENT_ID = '1536826368615256146';
+const discordPresence = new DiscordPresence({
+  clientId: process.env.RIZE_DISCORD_CLIENT_ID || process.env.VOTIFY_DISCORD_CLIENT_ID || RIZE_DISCORD_CLIENT_ID,
+  applicationName: 'RIZE',
+  fallbackImageKey: process.env.RIZE_DISCORD_LARGE_IMAGE_KEY || process.env.VOTIFY_DISCORD_LARGE_IMAGE_KEY,
+});
+
+// Support fresh PC mode or isolated user data directory
+const isFresh = process.argv.includes('--fresh') || process.env.VOTIFY_FRESH === '1';
+const freshUserDataDir = isFresh
+  ? path.join(require('os').tmpdir(), `votify-fresh-${Date.now()}`)
+  : null;
+const userDataPath =
+  process.env.VOTIFY_USER_DATA_DIR || freshUserDataDir || path.join(app.getPath('home'), '.votify');
+if (isFresh) {
+  console.log(`[main] Running in fresh PC mode (isolated data dir: ${userDataPath})`);
+}
+try {
+  fs.mkdirSync(userDataPath, { recursive: true });
+} catch (e) {
+  /* ignore */
+}
+app.setPath('userData', userDataPath);
+
+// Allow autoplay of audio without user gesture
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+// Fix cache errors with --no-sandbox
+app.commandLine.appendSwitch('disk-cache-dir', path.join(userDataPath, 'cache'));
+// UI files are served by the bundled local server. Caching them causes source
+// runs to show an older interface after an update.
+app.commandLine.appendSwitch('disable-http-cache');
+
+// Hardware acceleration & low-overhead Wayland/GPU pipeline (matching Swiftify performance)
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,CanvasOopifRaster,Accelerated2dCanvas');
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+  app.commandLine.appendSwitch('enable-native-gpu-memory-buffers');
+}
+
+function getGoogleDesktopCredentials() {
+  let clientId = process.env.VOTIFY_GOOGLE_DESKTOP_CLIENT_ID || '';
+  let clientSecret = process.env.VOTIFY_GOOGLE_DESKTOP_CLIENT_SECRET || '';
+  let config = null;
+  if (process.env.VOTIFY_FIREBASE_CONFIG) {
+    try {
+      config = JSON.parse(process.env.VOTIFY_FIREBASE_CONFIG);
+    } catch (error) {
+      console.warn('[google-auth] Invalid VOTIFY_FIREBASE_CONFIG:', error.message);
+    }
+  }
+  if (!config) {
+    try {
+      const configPath = path.join(__dirname, 'firebase-config.json');
+      config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.warn('[google-auth] Config error:', error.message);
+    }
+  }
+  clientId ||= config?.googleDesktopClientId || '';
+  clientSecret ||= config?.googleDesktopClientSecret || '';
+  const normalizedClientId = String(clientId).trim();
+  return {
+    clientId: isGoogleClientId(normalizedClientId) ? normalizedClientId : '',
+    clientSecret: String(clientSecret).trim(),
+  };
+}
+
+function findYtDlp() {
+  const isWindows = process.platform === 'win32';
+  const binaryName = isWindows ? 'yt-dlp.exe' : 'yt-dlp';
+
+  const candidates = [
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'bin', binaryName),
+    path.join(__dirname, 'bin', binaryName),
+    path.join(__dirname, binaryName),
+    path.join(process.resourcesPath || '', binaryName),
+    path.join(process.resourcesPath || '', 'app', 'bin', binaryName),
+  ];
+  for (const c of candidates) {
+    if (c.includes(`app.asar${path.sep}`) && !c.includes(`app.asar.unpacked${path.sep}`)) continue;
+    try {
+      const stat = fs.statSync(c);
+      if (stat.isFile()) return c;
+    } catch (e) {
+      // ignore missing candidate
+    }
+  }
+  return path.join(process.resourcesPath || __dirname, 'app.asar.unpacked', 'bin', binaryName);
+}
+
+function isPortFree(port) {
+  return new Promise(resolve => {
+    const srv = net.createServer();
+    srv.once('error', () => resolve(false));
+    srv.once('listening', () => {
+      srv.close();
+      resolve(true);
+    });
+    srv.listen(port, '127.0.0.1');
+  });
+}
+
+async function startServer() {
+  // Do not attach a new window to a stale server left by a previous Electron
+  // process. Pick the next local port when the default one is occupied.
+  while (!(await isPortFree(PORT))) PORT += 1;
+  const env = { ...process.env };
+  if (isFresh) {
+    env.VOTIFY_CONFIG_DIR = path.join(userDataPath, 'config');
+    env.XDG_CONFIG_HOME = path.join(userDataPath, 'config_home');
+  }
+  env.YT_DLP_PATH = findYtDlp();
+  env.VOTIFY_SRC_DIR = path.join(__dirname, 'src');
+  env.VOTIFY_PORT = String(PORT);
+
+  serverProcess = fork(path.join(__dirname, 'server.js'), {
+    env,
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+  });
+
+  serverProcess.stdout?.on('data', d => {
+    try {
+      console.log('[server]', d.toString().trim());
+    } catch (e) {
+      /* ignore */
+    }
+  });
+  serverProcess.stderr?.on('data', d => {
+    try {
+      console.error('[server]', d.toString().trim());
+    } catch (e) {
+      /* ignore */
+    }
+  });
+  serverProcess.on('error', err => console.error('Server process error:', err.message));
+  serverProcess.on('exit', (code, signal) => {
+    console.log(`Server exited with code ${code}, signal ${signal}`);
+  });
+
+  for (let i = 0; i < 30; i++) {
+    if (await isPortFree(PORT)) {
+      await new Promise(r => setTimeout(r, 500));
+    } else {
+      break;
+    }
+  }
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    frame: false,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      backgroundThrottling: false,
+      webSecurity: false,
+    },
+    icon: path.join(__dirname, 'src/icon.png'),
+    show: false,
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
+
+  mainWindow.webContents.session.on('will-download', (event, item) => {
+    try {
+      const downloadsPath = app.getPath('downloads');
+      const filename = item.getFilename();
+      item.setSavePath(path.join(downloadsPath, filename));
+    } catch (_) {}
+  });
+
+  // Load via HTTP to avoid file:// CORS issues
+  mainWindow.loadURL(`http://localhost:${PORT}/index.html?v=${Date.now()}`);
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('console-message', (event, level, message) => {
+    if (level >= 1 || message.includes('error') || message.includes('Lyrics') || message.includes('lyrics')) {
+      console.log(`[renderer:${level}]`, message);
+    }
+  });
+
+  mainWindow.webContents.on('render-process-gone', () => {
+    discordPresence.clear();
+  });
+
+  mainWindow.on('closed', () => {
+    discordPresence.clear();
+    mainWindow = null;
+  });
+
+  mainWindow.on('close', event => {
+    if (closeToTrayEnabled && !isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
+}
+
+function createTray() {
+  if (tray) return;
+  try {
+    const trayIconFile = fs.existsSync(path.join(__dirname, 'src/tray-icon.png'))
+      ? path.join(__dirname, 'src/tray-icon.png')
+      : path.join(__dirname, 'src/icon.png');
+    tray = new Tray(trayIconFile);
+    tray.setToolTip('RIZE');
+
+    const showWindow = () => {
+      if (!mainWindow) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    };
+
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Открыть RIZE',
+        click: showWindow,
+      },
+      {
+        label: 'Воспроизведение / Пауза',
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('player-action', 'play-pause');
+          }
+        },
+      },
+      {
+        label: 'Следующий трек',
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('player-action', 'next');
+          }
+        },
+      },
+      {
+        label: 'Предыдущий трек',
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('player-action', 'prev');
+          }
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Выход',
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    ]);
+    tray.setContextMenu(contextMenu);
+
+    tray.on('click', () => {
+      if (!mainWindow) return;
+      if (mainWindow.isVisible()) {
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+          mainWindow.focus();
+        } else {
+          mainWindow.hide();
+        }
+      } else {
+        showWindow();
+      }
+    });
+
+    tray.on('double-click', showWindow);
+  } catch (e) {
+    console.error('Tray creation failed:', e.message);
+  }
+}
+
+
+function setupAutoUpdater() {
+  if (!autoUpdater) return;
+
+  try {
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: 'https://gitlab.com/exieeez/rize/-/raw/releases/'
+    });
+  } catch (e) {
+    console.warn('[updater] setFeedURL error:', e.message);
+  }
+
+  if (!app.isPackaged) {
+    console.log('[updater] Skipping in dev mode (not packaged)');
+    checkGitHubForUpdates();
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.allowDowngrade = false;
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('[updater] Checking for update...');
+    mainWindow?.webContents.send('update:checking');
+  });
+
+  autoUpdater.on('update-available', info => {
+    console.log('[updater] Update available:', info.version);
+    mainWindow?.webContents.send('update:available', info);
+  });
+
+  autoUpdater.on('update-not-available', info => {
+    console.log('[updater] Update not available, current:', info.version);
+    mainWindow?.webContents.send('update:not-available', info);
+  });
+
+  autoUpdater.on('error', err => {
+    console.error('[updater] Error:', err.message);
+    mainWindow?.webContents.send('update:error', err.message);
+  });
+
+  autoUpdater.on('download-progress', progress => {
+    mainWindow?.webContents.send('update:progress', progress);
+  });
+
+  autoUpdater.on('update-downloaded', info => {
+    console.log('[updater] Update downloaded:', info.version);
+    mainWindow?.webContents.send('update:downloaded', info);
+    // Like Discord, show notification and auto-install on quit, but also allow immediate install
+  });
+
+  // Check on startup after 3s like Discord
+  setTimeout(() => {
+    console.log('[updater] Checking for updates on startup...');
+    autoUpdater.checkForUpdatesAndNotify().catch(e => console.warn('[updater] check failed:', e.message));
+  }, 3000);
+
+  // Check every 6 hours like Discord
+  setInterval(() => {
+    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+  }, 6 * 60 * 60 * 1000);
+}
+
+async function checkGitHubForUpdates() {
+  // Check GitLab releases first
+  try {
+    const https = require('https');
+    const currentVersion = app.getVersion();
+    const ymlFile = process.platform === 'linux' ? 'latest-linux.yml' : 'latest.yml';
+
+    const fetchGitLab = () => new Promise((resolve, reject) => {
+      const targetUrl = `https://gitlab.com/exieeez/rize/-/raw/releases/${ymlFile}?inline=false&t=${Date.now()}`;
+      const req = https.get(targetUrl, {
+        headers: { 'User-Agent': 'RIZE-Updater' }
+      }, res => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          https.get(res.headers.location, r2 => {
+            let d = '';
+            r2.on('data', c => d += c);
+            r2.on('end', () => resolve(d));
+          }).on('error', reject);
+          return;
+        }
+        if (res.statusCode !== 200) return reject(new Error('GitLab HTTP ' + res.statusCode));
+        let d = '';
+        res.on('data', c => d += c);
+        res.on('end', () => resolve(d));
+      });
+      req.on('error', reject);
+    });
+
+    try {
+      const yml = await fetchGitLab();
+      const match = yml.match(/version:\s*([0-9a-zA-Z.-]+)/);
+      if (match && match[1]) {
+        const latest = match[1].replace(/^v/, '');
+        console.log(`[updater] GitLab latest: ${latest}, current: ${currentVersion}`);
+        const cmp = latest.localeCompare(currentVersion, undefined, { numeric: true });
+        if (cmp > 0 || !app.isPackaged) {
+          mainWindow?.webContents.send('update:available', {
+            version: latest,
+            releaseNotes: 'Material You динамическая палитра, альбомный плеер для планшетов и оффлайн-треки',
+            releaseName: 'RIZE v' + latest
+          });
+          return;
+        }
+      }
+    } catch (e) {
+      console.log('[updater] GitLab raw check fallback:', e.message);
+    }
+
+    // Secondary GitLab API check
+    const gitlabApiOptions = {
+      hostname: 'gitlab.com',
+      path: '/api/v4/projects/exieeez%2Frize/releases?per_page=1',
+      method: 'GET',
+      headers: { 'User-Agent': 'RIZE-Updater', 'Accept': 'application/json' }
+    };
+    const reqGitLab = https.request(gitlabApiOptions, res => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const releases = JSON.parse(data);
+          const rel = Array.isArray(releases) && releases[0];
+          const latest = rel ? (rel.tag_name || rel.name || '').replace(/^v/, '') : '';
+          if (latest) {
+            console.log(`[updater] GitLab API latest: ${latest}, current: ${currentVersion}`);
+            const cmp = latest.localeCompare(currentVersion, undefined, { numeric: true });
+            if (cmp > 0 || !app.isPackaged) {
+              const displayVer = cmp > 0 ? latest : '1.4.0';
+              mainWindow?.webContents.send('update:available', {
+                version: displayVer,
+                releaseNotes: rel.description || 'Обновление RIZE',
+                releaseName: rel.name || ('RIZE v' + displayVer)
+              });
+              return;
+            }
+          }
+        } catch (e) {}
+      });
+    });
+    reqGitLab.on('error', () => {});
+    reqGitLab.end();
+  } catch (e) {}
+}
+
+app.whenReady().then(async () => {
+  integrateLinuxAppImage({ app });
+  if (!discordPresence.start()) {
+    console.warn('[discord] Rich Presence disabled: invalid Discord Application ID');
+  }
+  await startServer();
+  createWindow();
+  createTray();
+  setupAutoUpdater();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    } else if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (closeToTrayEnabled && !isQuitting) return;
+  if (process.platform !== 'darwin') {
+    if (serverProcess) {
+      serverProcess.kill();
+    }
+    app.quit();
+  }
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
+  try {
+    globalShortcut.unregisterAll();
+  } catch (e) {}
+  void discordPresence.stop();
+  if (serverProcess) {
+    serverProcess.kill();
+  }
+});
+
+ipcMain.handle('check-for-updates', async () => {
+  if (autoUpdater && app.isPackaged) {
+    try {
+      return await autoUpdater.checkForUpdates();
+    } catch (e) {
+      return { error: e.message };
+    }
+  } else {
+    checkGitHubForUpdates();
+    return { message: 'Checking GitHub...' };
+  }
+});
+
+ipcMain.handle('install-update', () => {
+  if (autoUpdater) {
+    autoUpdater.quitAndInstall(true, true);
+  }
+});
+
+ipcMain.handle('set-app-icon', (event, iconName) => {
+  const iconFile = path.join(__dirname, 'src/assets/icons', `icon-${iconName}.png`);
+  if (fs.existsSync(iconFile)) {
+    try {
+      mainWindow?.setIcon(iconFile);
+      tray?.setImage(iconFile);
+    } catch (e) {
+      console.warn('Could not set app icon:', e.message);
+    }
+  }
+});
+
+ipcMain.handle('minimize', () => mainWindow?.minimize());
+ipcMain.handle('maximize', () => {
+  if (!mainWindow) return false;
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+  return mainWindow.isMaximized();
+});
+ipcMain.handle('close', () => mainWindow?.close());
+ipcMain.handle('isMaximized', () => mainWindow?.isMaximized());
+ipcMain.handle('get-server-port', () => PORT);
+ipcMain.handle('pick-media', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Выберите фон (изображение или видео)',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Media', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'mp4', 'webm'] },
+      { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg'] },
+      { name: 'Videos', extensions: ['mp4', 'webm'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  if (result.canceled || !result.filePaths || !result.filePaths.length) return null;
+  const filePath = result.filePaths[0];
+  return `/api/local-media?file=${encodeURIComponent(filePath)}`;
+});
+
+// --- Download folder (папка для локального сохранения треков) ---
+const DOWNLOAD_SETTINGS_FILE = path.join(userDataPath, 'downloads.json');
+
+function getDefaultDownloadDir() {
+  try {
+    return app.getPath('downloads');
+  } catch (e) {
+    return path.join(app.getPath('home'), 'Downloads');
+  }
+}
+
+function readDownloadSettings() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(DOWNLOAD_SETTINGS_FILE, 'utf8'));
+    const dir = raw && typeof raw.dir === 'string' && path.isAbsolute(raw.dir) ? raw.dir : '';
+    return { dir: dir || getDefaultDownloadDir(), isCustom: !!dir };
+  } catch (e) {
+    return { dir: getDefaultDownloadDir(), isCustom: false };
+  }
+}
+
+function writeDownloadSettings(dir) {
+  try {
+    fs.writeFileSync(DOWNLOAD_SETTINGS_FILE, JSON.stringify({ dir: dir || '' }, null, 2));
+  } catch (e) {
+    console.warn('[downloads] Could not save download folder:', e.message);
+  }
+}
+
+ipcMain.handle('download:get-dir', () => readDownloadSettings());
+
+ipcMain.handle('download:pick-dir', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const current = readDownloadSettings();
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Куда сохранить треки',
+    defaultPath: current.dir,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || !result.filePaths || !result.filePaths.length) return null;
+  const dir = result.filePaths[0];
+  writeDownloadSettings(dir);
+  return dir;
+});
+
+ipcMain.handle('download:set-dir', (event, dir) => {
+  const target = String(dir || '').trim();
+  if (!target || !path.isAbsolute(target)) return { ok: false, error: 'Invalid folder' };
+  writeDownloadSettings(target);
+  return { ok: true, dir: target };
+});
+
+ipcMain.handle('download:reset-dir', () => {
+  writeDownloadSettings('');
+  return { ok: true, dir: getDefaultDownloadDir() };
+});
+
+ipcMain.handle('show-save-dialog', async (event, options = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const current = readDownloadSettings();
+  const defaultDir = current.dir || getDefaultDownloadDir();
+  const safeFilename = (options.filename || 'track.opus').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_');
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: options.title || 'Сохранить трек на устройство',
+    defaultPath: options.defaultPath || path.join(defaultDir, safeFilename),
+    filters: options.filters || [
+      { name: 'Audio (Opus)', extensions: ['opus'] },
+      { name: 'Audio (MP3)', extensions: ['mp3'] },
+      { name: 'Audio (FLAC)', extensions: ['flac'] },
+      { name: 'Audio (OGG)', extensions: ['ogg'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  if (result.canceled || !result.filePath) return null;
+  return result.filePath;
+});
+
+ipcMain.handle('download:open-folder', async (event, target) => {
+  const dir = String(target || '').trim();
+  if (!dir || !path.isAbsolute(dir)) return false;
+  try {
+    await shell.openPath(dir);
+    return true;
+  } catch (e) {
+    return false;
+  }
+});
+
+ipcMain.handle('google-auth:start', async event => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) {
+    return { error: 'Запрос входа отклонён' };
+  }
+  const { clientId, clientSecret } = getGoogleDesktopCredentials();
+  if (!clientId) {
+    return {
+      error: 'Добавьте googleDesktopClientId из Google Cloud в firebase-config.json',
+    };
+  }
+  if (!googleAuthPromise) {
+    googleAuthPromise = startGoogleOAuth({
+      clientId,
+      clientSecret,
+      openExternal: url => shell.openExternal(url),
+    }).finally(() => {
+      googleAuthPromise = null;
+    });
+  }
+  try {
+    return { tokens: await googleAuthPromise };
+  } catch (error) {
+    return { error: error.message || 'Не удалось выполнить вход через Google' };
+  }
+});
+
+ipcMain.on('discord-presence:update', (event, playback) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return;
+  discordPresence.update(playback);
+});
+
+ipcMain.on('discord-presence:clear', event => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return;
+  discordPresence.clear();
+});
+
+// --- Settings-related IPC ---
+ipcMain.handle('get-launch-at-login', () => {
+  try {
+    return app.getLoginItemSettings().openAtLogin;
+  } catch (e) {
+    return false;
+  }
+});
+
+ipcMain.handle('set-launch-at-login', (event, enabled) => {
+  try {
+    app.setLoginItemSettings({ openAtLogin: !!enabled });
+    return true;
+  } catch (e) {
+    console.error('Failed to set launch at login:', e.message);
+    return false;
+  }
+});
+
+// Открывает ссылку в браузере по умолчанию (логотип Votify в шапке → сайт проекта).
+ipcMain.handle('open-external', async (event, url) => {
+  const target = String(url || '').trim();
+  if (!/^https?:\/\//i.test(target)) return false;
+  try {
+    await shell.openExternal(target);
+    return true;
+  } catch (e) {
+    console.error('Failed to open external url:', e.message);
+    return false;
+  }
+});
+
+// IPC Handler to physically throw/knockback OS cursor when pet gets angry
+ipcMain.handle('throw-cursor', (event, { dx = -250, dy = -250 }) => {
+  try {
+    const { exec } = require('child_process');
+    if (process.platform === 'linux') {
+      exec(`xdotool mousemove_relative -- ${dx} ${dy}`, err => {
+        if (err) {
+          exec(`python3 -c "import pyautogui; pyautogui.moveRel(${dx}, ${dy})"`);
+        }
+      });
+    } else if (process.platform === 'win32') {
+      exec(
+        `powershell -command "[reflection.assembly]::loadwithpartialname('System.Windows.Forms'); $p = [System.Windows.Forms.Cursor]::Position; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(($p.X + ${dx}), ($p.Y + ${dy}))"`
+      );
+    }
+    return true;
+  } catch (e) {
+    console.error('Failed to throw cursor:', e.message);
+    return false;
+  }
+});
+
+ipcMain.on('set-close-to-tray', (event, enabled) => {
+  closeToTrayEnabled = !!enabled;
+});
+
+ipcMain.handle('install-soundpad-driver', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const { exec } = require('child_process');
+      return new Promise(resolve => {
+        exec('powershell -Command "Get-AudioDevice -List | Enable-AudioDevice"', () => {
+          resolve({ success: true, message: 'Виртуальный драйвер RIZE Audio подключен!' });
+        });
+      });
+    }
+    return { success: true, message: 'Встроенный Soundpad активен!' };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+});
+
+

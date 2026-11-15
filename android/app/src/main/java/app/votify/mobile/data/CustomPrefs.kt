@@ -1,0 +1,220 @@
+package app.votify.mobile.data
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
+/**
+ * OAuth Web Client ID for Google Sign-In (Firebase project votify-f461a).
+ * Public by design — every Google-enabled app ships its web client id in the APK;
+ * the Android side needs no client secret (ID-token flow).
+ */
+const val DEFAULT_GOOGLE_CLIENT_ID = "283427548411-h1i4r87j2krlgpu4hdh4og7e3ahv6sk7.apps.googleusercontent.com"
+
+/**
+ * All Dotify-style customization settings, persisted as ONE JSON blob in DataStore
+ * (key `custom_prefs`). Being a single serializable object makes snapshots («Пресеты»),
+ * server sync («Отправить/Получить») and import/export trivial.
+ */
+@Serializable
+data class CustomPrefs(
+    // ---- Основные ----
+    val notifications: Boolean = true,
+    val canvas: Boolean = false,
+
+    // ---- Аудио ----
+    val audioEngine: String = "ytdlp", // ytdlp | audius
+    val soundcloudEngine: String = "alt", // alt | direct | extractor
+    val downloadFormat: String = "opus", // opus | ogg | mp3 | flac
+    val exportToDownloads: Boolean = true,
+    val caching: Boolean = false,
+    val gapless: Boolean = true,
+    val crossfade: Boolean = false,
+    /** Длительность плавного перехода между треками, секунды (используется при crossfade). */
+    val crossfadeSeconds: Int = 4,
+    val normalization: Boolean = false,
+    val onNotification: String = "duck", // duck | pause | continue
+    val autoplay: Boolean = false,
+    val similarToQueue: Boolean = true,
+    val restoreQueue: Boolean = true,
+    val playbackSpeed: Float = 1.0f,
+    val playbackPitch: Float = 1.0f,
+    val pitchShiftLinked: Boolean = true,
+    val reverbPreset: String = "none", // none | hall | room | plate
+    val bassBoost: Boolean = false,
+    val equalizerPreset: String = "neutral", // neutral | bass | treble | vocal | electronic | rock | custom
+    val equalizerBands: String = "0.0,0.0,0.0,0.0,0.0,0.0", // 6 bands: 60Hz, 150Hz, 400Hz, 1kHz, 2.4kHz, 15kHz
+
+    // ---- Интерфейс ----
+    val themeMode: String = "dark", // dark | light | system
+    val themeName: String = "neutral", // neutral | graphite | violet | azure | emerald | amber | rose | workshop
+    /** Вариант иконки приложения: current | bw | glass | classic | custom (см. AppIcon). */
+    val appIcon: String = "current",
+    val tabStyle: String = "standard", // standard | compact
+    val accentFromArt: Boolean = false,
+    /**
+     * Мастер-тумблер «Liquid Glass»: одно стекло и для нижней панели, и для всего
+     * интерфейса. Выключен — все поверхности плотные, как обычные карточки.
+     */
+    val glassEnabled: Boolean = true,
+    /** Прозрачность стекла, 0..100 %. 100 — самое прозрачное стекло, 0 — плотное. */
+    val glassAlpha: Int = 60,
+    /** Сила размытия под стеклом, 0..60 dp. Работает и у панели, и у интерфейса. */
+    val glassBlur: Int = 20,
+    /** Тип стекла: balance | frosted | vivid | clear */
+    val glassType: String = "balance",
+    /** Служебный флаг: старые поля прозрачности уже перенесены в glass*. */
+    val glassMigrated: Boolean = false,
+    @Deprecated("Заменено на glassEnabled/glassAlpha/glassBlur — одно стекло на всю тему")
+    val transparentCards: Boolean = false,
+    @Deprecated("Заменено на glassAlpha")
+    val cardsAlpha: Int = 100, // 0..100 (%)
+    @Deprecated("Заменено на glassBlur")
+    val cardsBlur: Int = 20, // 0..60 (dp)
+    @Deprecated("Заменено на glassEnabled")
+    val liquidGlass: Boolean = false,
+    val fontFamily: String = "system", // system | serif | mono | rounded
+    val fontScale: String = "normal", // small | normal | large
+
+    // ---- Нижняя панель навигации (геометрия; стекло — общее, см. glass*) ----
+    @Deprecated("Заменено на glassAlpha")
+    val navBarAlpha: Int = 100, // 0..100 (%)
+    @Deprecated("Заменено на glassBlur")
+    val navBarBlur: Int = 20, // 0..60 (dp)
+    @Deprecated("Заменено на glassEnabled")
+    val navBarLiquidGlass: Boolean = false,
+    val navBarHeight: Int = 64, // 48..80 (dp)
+    val navBarIsland: Boolean = false,
+
+    // ---- Плеер ----
+    val playerDesign: String = "new", // new (Flagship player) | old (Old player)
+    val playerStyle: String = "vinyl", // vinyl | square | blur  (maps ArtworkStyle)
+    val titleAlign: String = "center", // center | left
+    val sliderStyle: String = "ios", // ios | classic
+    val playButtonStyle: String = "circle", // circle | pill
+    val infoChip: String = "source", // source | text | none
+    val miniBg: String = "plain", // plain | artwork
+    val miniProgress: String = "ring", // ring | bar | none
+    val miniCoverShape: String = "rounded", // circle | rounded
+    val miniCorners: String = "pill", // pill | rounded
+    val miniButtons: String = "both", // both | play | none
+    val miniButtonStyle: String = "filled", // filled | outline
+
+    // ---- Обложка ----
+    val gifArtwork: String = "", // URL/path, "" = обычная обложка
+    val artworkAnimation: String = "none", // none | spin | sway | pulse | float
+    val artworkEffect: String = "none", // none | grayscale | blur
+    val artBlur: Int = 0, // размытие обложки (dp), 0..30
+    val artDim: Int = 0, // затемнение обложки (%, 0..80)
+
+    // ---- Область применения / условия темы из Мастерской ----
+    val themeApplyBackground: Boolean = true,
+    val themeApplyArtwork: Boolean = false,
+    val themeApplySlider: Boolean = false,
+    val themeArtworkAlways: Boolean = true, // true = всегда; false = только заглушка без своей обложки
+    val artworkInside: Boolean = false,
+
+    // ---- Свайпы ----
+    val librarySwipeLeft: String = "queue", // queue | favorite | delete | none
+    val librarySwipeRight: String = "none", // queue | favorite | delete | none
+    val queueSwipeLeft: String = "delete",
+    val queueSwipeRight: String = "delete",
+    val miniSwipeLeft: String = "next", // next | previous | queue
+    val miniSwipeRight: String = "previous", // next | previous | queue
+    val playerSwipes: Boolean = true,
+
+    // ---- Библиотека (фоны) ----
+    val backgrounds: List<String> = emptyList(),
+    val bgDim: Int = 35, // затемнение фоновой картинки, % (0..92)
+    val bgBlur: Int = 0, // размытие фоновой картинки, dp (0..60)
+    val bgScale: Float = 1f, // масштаб фона (1..5) — чтобы обрезать широкий ПК-фон
+    val bgOffsetX: Float = 0f, // сдвиг кадра по горизонтали (-1..1)
+    val bgOffsetY: Float = 0f, // сдвиг кадра по вертикали (-1..1)
+    val bgFit: Int = 0, // как фон ложится на экран: 0 — заполнить (обрезать), 1 — целиком, 2 — растянуть
+
+    // ---- Прокси ----
+    val proxyEnabled: Boolean = false,
+    val proxyHost: String = "",
+    val proxyPort: String = "",
+    val zapretEnabled: Boolean = false,
+    val zapretHost: String = "127.0.0.1",
+    val zapretPort: String = "1080",
+
+    // ---- Google Sign-In ----
+    val googleClientId: String = "",
+
+    // ---- Первый запуск ----
+    val welcomeDone: Boolean = false,
+
+    // ---- Пресеты ----
+    val presets: List<NamedPreset> = emptyList(),
+)
+
+/** A saved snapshot of [CustomPrefs] («Пресеты»). */
+@Serializable
+data class NamedPreset(val name: String, val prefs: CustomPrefs = CustomPrefs())
+
+private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+fun CustomPrefs.toJson(): String = json.encodeToString(CustomPrefs.serializer(), this)
+
+fun parseCustomPrefs(raw: String): CustomPrefs =
+    if (raw.isBlank()) CustomPrefs()
+    else runCatching { json.decodeFromString<CustomPrefs>(raw) }
+        .getOrDefault(CustomPrefs())
+        .migrateGlassPrefs()
+
+/**
+ * Переносит старые раздельные настройки прозрачности (карточки / нижняя панель)
+ * в единые glass* один раз, чтобы у пользователя не сбросились подобранные значения.
+ *
+ * Учитывается то, что старое поле transparentCards означало «включить прозрачность»,
+ * а alpha была ПРОЗРАЧНОСТЬЮ (100 — прозрачно, 0 — плотно) — совпадает с трактовкой glassAlpha.
+ */
+private fun CustomPrefs.migrateGlassPrefs(): CustomPrefs {
+    if (glassMigrated) return this
+
+    // Следы старых настроек: тумблер включали или уводили прозрачность от 100 %.
+    val legacyGlassOn = transparentCards || liquidGlass || navBarLiquidGlass
+    val legacyAlpha = listOf(cardsAlpha, navBarAlpha).filter { it in 0..100 && it != 100 }.minOrNull()
+    val legacyBlur = listOf(cardsBlur, navBarBlur).filter { it in 0..60 }.maxOrNull()
+
+    return copy(
+        // По умолчанию стекло оставляем включённым: пользователь и так просил прозрачность,
+        // а «выключено» переносим только при отсутствии любых следов настройки.
+        glassEnabled = if (legacyGlassOn || legacyAlpha != null) true else glassEnabled,
+        glassAlpha = legacyAlpha ?: glassAlpha,
+        glassBlur = legacyBlur ?: glassBlur,
+        glassMigrated = true,
+    )
+}
+
+/** themeMode + themeName → the AppTheme enum actually applied. */
+fun CustomPrefs.toAppTheme(): AppTheme = when (themeMode) {
+    "light" -> AppTheme.Light
+    "system" -> AppTheme.System
+    else -> when (themeName.lowercase()) {
+        "amoled", "oled", "trueblack" -> AppTheme.OledBlack
+        "graphite", "neutral", "dark" -> AppTheme.Graphite
+        "violet" -> AppTheme.Violet
+        "azure", "sky", "aqua" -> AppTheme.Azure
+        "emerald", "mint" -> AppTheme.Emerald
+        "amber", "sand" -> AppTheme.Amber
+        "rose", "blossom" -> AppTheme.Rose
+        "workshop" -> AppTheme.Workshop
+        else -> AppTheme.OledBlack
+    }
+}
+
+/** The AppTheme value back into themeMode/themeName pair (for the Interface screen). */
+fun AppTheme.toPrefsPair(): Pair<String, String> = when (this) {
+    AppTheme.Light -> "light" to "neutral"
+    AppTheme.System -> "system" to "neutral"
+    AppTheme.OledBlack -> "dark" to "amoled"
+    AppTheme.Graphite -> "dark" to "neutral"
+    AppTheme.Violet -> "dark" to "violet"
+    AppTheme.Azure -> "dark" to "azure"
+    AppTheme.Emerald -> "dark" to "emerald"
+    AppTheme.Amber -> "dark" to "amber"
+    AppTheme.Rose -> "dark" to "rose"
+    AppTheme.Workshop -> "dark" to "workshop"
+}
