@@ -13321,8 +13321,29 @@ window.addEventListener('message', (e) => {
       window.electronAPI.checkForUpdates();
     }
 
-    const targetFile = navigator.userAgent.includes('Linux') ? 'latest-linux.yml' : 'latest.yml';
-    fetch(`https://gitlab.com/exieeez/rize/-/raw/releases/${targetFile}?inline=false&t=` + Date.now())
+    fetch('https://raw.githubusercontent.com/exieeez2/RIZE/main/version.json?t=' + Date.now())
+      .then(r => {
+        if (!r.ok) throw new Error('GitHub HTTP ' + r.status);
+        return r.json();
+      })
+      .then(data => {
+        const latest = (data.versionName || data.version || '').replace(/^v/, '');
+        const isNewer = latest && latest.localeCompare(currentAppVersion, undefined, { numeric: true }) > 0;
+        if (isNewer) {
+          availableInfo = {
+            version: latest,
+            changelog: data.releaseNotes || 'Обновление RIZE'
+          };
+          showBanner(`Доступно обновление ${latest}`, 'Обновить');
+          showToast(`🔔 Найдено обновление RIZE ${latest}! Нажмите «Обновить» в шапке`);
+        } else if (force) {
+          hideBanner();
+          showToast(`Вы используете актуальную версию RIZE ${currentAppVersion}`);
+        }
+      })
+      .catch(() => {
+        const targetFile = navigator.userAgent.includes('Linux') ? 'latest-linux.yml' : 'latest.yml';
+        fetch(`https://gitlab.com/exieeez/rize/-/raw/releases/${targetFile}?inline=false&t=` + Date.now())
       .then(r => {
         if (!r.ok) throw new Error('GitLab HTTP ' + r.status);
         return r.text();

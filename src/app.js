@@ -13630,7 +13630,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll(`style[data-plugin="${p.file}"]`).forEach((n) => n.remove());
     const hadStop = !!(entry && entry.stop);
     loadedPlugins.delete(p.file);
-    if (!silent && !hadStop) showToast(`Restart Riff to fully unload "${p.name}"`, 'info');
+    if (!silent && !hadStop) showToast(`Restart RIZE to fully unload "${p.name}"`, 'info');
   }
   let pluginsCache = [];
   function renderPluginCards() {
@@ -13906,7 +13906,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const btnConfirm = document.getElementById('btn-confirm-spotify-import');
       if (btnConfirm) btnConfirm.click();
     }
-    showToast('Welcome to Riff!', 'info');
+    showToast('Welcome to RIZE!', 'info');
   }
   function checkWelcomeOnboarding() {
     const isDone = localStorage.getItem('votify_welcome_done') === '1';
@@ -14491,8 +14491,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.electronAPI.checkForUpdates();
       }
 
-      const targetFile = navigator.userAgent.includes('Linux') ? 'latest-linux.yml' : 'latest.yml';
-      fetch(`https://gitlab.com/exieeez/rize/-/raw/releases/${targetFile}?inline=false&t=` + Date.now())
+      fetch('https://raw.githubusercontent.com/exieeez2/RIZE/main/version.json?t=' + Date.now())
+        .then(r => {
+          if (!r.ok) throw new Error('GitHub HTTP ' + r.status);
+          return r.json();
+        })
+        .then(data => {
+          const latest = (data.versionName || data.version || '').replace(/^v/, '');
+          const isNewer = latest && latest.localeCompare(currentAppVersion, undefined, { numeric: true }) > 0;
+          if (isNewer) {
+            availableInfo = {
+              version: latest,
+              changelog: data.releaseNotes || 'Обновление RIZE'
+            };
+            showBanner(`Доступно обновление ${latest}`, 'Обновить');
+            showToast(`🔔 Найдено обновление RIZE ${latest}! Нажмите «Обновить» в шапке`);
+          } else if (force) {
+            hideBanner();
+            showToast(`Вы используете актуальную версию RIZE ${currentAppVersion}`);
+          }
+        })
+        .catch(() => {
+          const targetFile = navigator.userAgent.includes('Linux') ? 'latest-linux.yml' : 'latest.yml';
+          fetch(`https://gitlab.com/exieeez/rize/-/raw/releases/${targetFile}?inline=false&t=` + Date.now())
         .then(r => {
           if (!r.ok) throw new Error('GitLab HTTP ' + r.status);
           return r.text();
@@ -19432,7 +19453,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       btnChangeMusicFolder.textContent = 'Restarting...';
-      showToast('Restarting Riff...');
+      showToast('Restarting RIZE...');
       setTimeout(() => { if (window.electronAPI.restartApp) window.electronAPI.restartApp(); }, 400);
     });
   }

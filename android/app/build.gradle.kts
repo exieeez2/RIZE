@@ -24,8 +24,8 @@ android {
         targetSdk = 35
         val runNumber = (project.findProperty("votifyRunNumber") as String?)?.toIntOrNull()
             ?: (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull())
-        val baseRun = runNumber ?: 251
-        versionCode = if (baseRun < 1000) 1000 + baseRun else baseRun
+        val baseRun = runNumber ?: 401
+        versionCode = if (baseRun < 1400) 1400 + baseRun else baseRun
         versionName = "1.4.0"
 
         // Backend base URL. 10.0.2.2 = host machine from the Android emulator.

@@ -10,12 +10,15 @@ import androidx.lifecycle.viewModelScope
 import app.votify.mobile.data.LibraryRepository
 import app.votify.mobile.data.Track
 import app.votify.mobile.data.MusicRepository
+import app.votify.mobile.data.local.PlaylistSummary
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,11 +34,14 @@ import java.util.Locale
 data class ImportUiState(
     val url: String = "",
     val loading: Boolean = false,
+    val progress: Float = 0f,
+    val statusMessage: String = "",
     val error: String? = null,
     /** Non-empty after a successful import: tracks + editable playlist name. */
     val tracks: List<Track> = emptyList(),
     val name: String = "",
     val saving: Boolean = false,
+    val autoUpdate: Boolean = false,
 )
 
 sealed interface ImportEvent {
@@ -58,20 +64,47 @@ class ImportViewModel(
     private val _events = MutableSharedFlow<ImportEvent>(extraBufferCapacity = 2)
     val events: SharedFlow<ImportEvent> = _events
 
-    fun onUrlChange(v: String) = _state.update { it.copy(url = v) }
+    val playlists: StateFlow<List<PlaylistSummary>> = library.playlists
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun onUrlChange(v: String) = _state.update { it.copy(url = v, error = null) }
 
     fun onNameChange(v: String) = _state.update { it.copy(name = v.take(80)) }
+
+    fun toggleAutoUpdate() = _state.update { it.copy(autoUpdate = !it.autoUpdate) }
+
+    fun clearUrl() = _state.update { it.copy(url = "", error = null, tracks = emptyList(), name = "", statusMessage = "", progress = 0f) }
+
+    fun deletePlaylist(id: Long) {
+        viewModelScope.launch {
+            library.deletePlaylist(id)
+        }
+    }
 
     fun import() {
         val url = _state.value.url.trim()
         if (url.isEmpty() || _state.value.loading) return
         viewModelScope.launch {
-            _state.update { it.copy(loading = true, error = null, tracks = emptyList(), name = "") }
-            runCatching { music.importPlaylist(url) }
+            _state.update {
+                it.copy(
+                    loading = true,
+                    progress = 0.25f,
+                    statusMessage = "Подключение к источнику...",
+                    error = null,
+                    tracks = emptyList(),
+                    name = ""
+                )
+            }
+            runCatching {
+                _state.update { it.copy(progress = 0.65f, statusMessage = "Синхронизация треков...") }
+                music.importPlaylist(url)
+            }
                 .onSuccess { imported ->
                     _state.update {
                         it.copy(
                             loading = false,
+                            progress = 1f,
+                            statusMessage = "Готово • получено ${imported.tracks.size} треков",
                             tracks = imported.tracks,
                             name = imported.name?.takeIf { n -> n.isNotBlank() } ?: defaultName(),
                         )
@@ -79,7 +112,14 @@ class ImportViewModel(
                 }
                 .onFailure { e ->
                     if (e is CancellationException) throw e
-                    _state.update { it.copy(loading = false, error = e.message ?: "Import failed") }
+                    _state.update {
+                        it.copy(
+                            loading = false,
+                            progress = 0f,
+                            statusMessage = "",
+                            error = e.message ?: "Не удалось импортировать плейлист"
+                        )
+                    }
                 }
         }
     }

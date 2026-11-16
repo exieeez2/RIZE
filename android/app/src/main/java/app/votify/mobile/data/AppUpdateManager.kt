@@ -117,6 +117,7 @@ class AppUpdateManager(
 
             val curCode = BuildConfig.VERSION_CODE
             val curSha = BuildConfig.BUILD_SHA
+            val curName = BuildConfig.VERSION_NAME
 
             // If the installed build matches the remote commit SHA, it is ALREADY the latest build!
             val isMatchingSha = if (info.sha.isNotBlank() && curSha.isNotBlank() && !curSha.equals("dev", ignoreCase = true)) {
@@ -134,6 +135,20 @@ class AppUpdateManager(
                 return@launch
             }
 
+            val remoteName = info.versionName.ifBlank { info.version }
+            val isSemanticOlderOrSame = isSemanticVersionOlderOrSame(remoteName, curName)
+            if (isSemanticOlderOrSame && !curSha.equals("dev", ignoreCase = true)) {
+                runCatching {
+                    getUpdateApkFile().delete()
+                    getUpdateMetaFile().delete()
+                    File(context.cacheDir, "updates").deleteRecursively()
+                }
+                _state.value = UpdateState.Idle
+                withContext(Dispatchers.Main) { onResult?.invoke(false) }
+                return@launch
+            }
+
+            val isNewerSemVer = isSemanticVersionNewer(remoteName, curName)
             val isNewerCode = info.versionCode > curCode
             val isNewerSha = if (info.sha.isNotBlank()) {
                 if (curSha.isBlank() || curSha.equals("dev", ignoreCase = true)) {
@@ -143,9 +158,8 @@ class AppUpdateManager(
                 }
             } else false
 
-            // An update is considered newer ONLY if remote code > curCode,
-            // or if codes match and remote commit sha is newer.
-            val isNewer = isNewerCode || (isNewerSha && (info.versionCode <= 0 || info.versionCode >= curCode))
+            // An update is considered newer ONLY if remote version is strictly newer
+            val isNewer = isNewerSemVer || (!isSemanticOlderOrSame && (isNewerCode || (isNewerSha && (info.versionCode <= 0 || info.versionCode >= curCode))))
 
             if (!force && dismissedSha == info.sha) {
                 _state.value = UpdateState.Idle
@@ -196,13 +210,42 @@ class AppUpdateManager(
         }
     }
 
+    private fun isSemanticVersionNewer(remoteVersion: String, currentVersion: String): Boolean {
+        if (remoteVersion.isBlank() || currentVersion.isBlank()) return false
+        val rParts = remoteVersion.trimStart('v', 'V').split('.').mapNotNull { it.toIntOrNull() }
+        val cParts = currentVersion.trimStart('v', 'V').split('.').mapNotNull { it.toIntOrNull() }
+        val maxLen = maxOf(rParts.size, cParts.size)
+        for (i in 0 until maxLen) {
+            val r = rParts.getOrElse(i) { 0 }
+            val c = cParts.getOrElse(i) { 0 }
+            if (r > c) return true
+            if (r < c) return false
+        }
+        return false
+    }
+
+    private fun isSemanticVersionOlderOrSame(remoteVersion: String, currentVersion: String): Boolean {
+        if (remoteVersion.isBlank() || currentVersion.isBlank()) return false
+        val rParts = remoteVersion.trimStart('v', 'V').split('.').mapNotNull { it.toIntOrNull() }
+        val cParts = currentVersion.trimStart('v', 'V').split('.').mapNotNull { it.toIntOrNull() }
+        val maxLen = maxOf(rParts.size, cParts.size)
+        for (i in 0 until maxLen) {
+            val r = rParts.getOrElse(i) { 0 }
+            val c = cParts.getOrElse(i) { 0 }
+            if (r > c) return false
+            if (r < c) return true
+        }
+        return true
+    }
+
     private suspend fun fetchUpdateInfo(): UpdateInfo? = withContext(Dispatchers.IO) {
         val urls = listOf(
             "https://raw.githubusercontent.com/exieeez2/RIZE/main/version.json?t=${System.currentTimeMillis()}",
+            "https://cdn.jsdelivr.net/gh/exieeez2/RIZE@main/version.json?t=${System.currentTimeMillis()}",
+            "https://api.github.com/repos/exieeez2/RIZE/releases/latest",
             "https://raw.githubusercontent.com/exieeez2/RIZE/main/android/version.json?t=${System.currentTimeMillis()}",
             "https://gitlab.com/exieeez/rize/-/raw/apk/version.json?inline=false&t=${System.currentTimeMillis()}",
-            "https://gitlab.com/exieeez/rize/-/raw/releases/latest-android.json?inline=false&t=${System.currentTimeMillis()}",
-            "https://cdn.jsdelivr.net/gh/exieeez2/RIZE@main/version.json?t=${System.currentTimeMillis()}"
+            "https://gitlab.com/exieeez/rize/-/raw/releases/latest-android.json?inline=false&t=${System.currentTimeMillis()}"
         )
         val deferreds = urls.map { url ->
             async {
@@ -216,6 +259,28 @@ class AppUpdateManager(
                         if (resp.isSuccessful) {
                             val body = resp.body?.string().orEmpty()
                             if (body.isNotBlank()) {
+                                if (body.contains("\"tag_name\"") && body.contains("\"assets\"")) {
+                                    val tag = Regex("\"tag_name\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1).orEmpty()
+                                    val cleanVer = tag.trimStart('v', 'V')
+                                    val apkUrl = Regex("\"browser_download_url\"\\s*:\\s*\"([^\"]*\\.apk)\"").find(body)?.groupValues?.get(1)
+                                        ?: "https://github.com/exieeez2/RIZE/releases/download/$tag/RIZE-$tag.apk"
+                                    val notes = Regex("\"body\"\\s*:\\s*\"([^\"]*)\"").find(body)?.groupValues?.get(1).orEmpty()
+                                    val code = cleanVer.split('.').mapNotNull { it.toIntOrNull() }.let { parts ->
+                                        val maj = parts.getOrElse(0) { 1 }
+                                        val min = parts.getOrElse(1) { 0 }
+                                        val patch = parts.getOrElse(2) { 0 }
+                                        maj * 1000 + min * 100 + patch
+                                    }
+                                    return@async UpdateInfo(
+                                        versionCode = code,
+                                        versionName = cleanVer,
+                                        version = cleanVer,
+                                        downloadUrl = apkUrl,
+                                        releaseUrl = apkUrl,
+                                        url = apkUrl,
+                                        releaseNotes = notes
+                                    )
+                                }
                                 val parsed = json.decodeFromString<UpdateInfo>(body)
                                 if (parsed.versionCode > 0 || parsed.sha.isNotBlank()) {
                                     return@async parsed
@@ -228,7 +293,10 @@ class AppUpdateManager(
             }
         }
         val candidates = deferreds.awaitAll().filterNotNull()
-        candidates.maxByOrNull { it.versionCode }
+        val curName = BuildConfig.VERSION_NAME
+        // Filter out candidates that are older than or equal to current installed versionName
+        val validCandidates = candidates.filterNot { isSemanticVersionOlderOrSame(it.versionName.ifBlank { it.version }, curName) }
+        validCandidates.maxByOrNull { it.versionCode }
     }
 
     fun startDownload(info: UpdateInfo) {
