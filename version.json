@@ -1,0 +1,13 @@
+{
+  "versionCode": 1401,
+  "versionName": "1.4.0",
+  "version": "1.4.0",
+  "sha": "0c0ae42",
+  "shortSha": "0c0ae42",
+  "downloadUrl": "https://github.com/exieeez2/RIZE/releases/download/v1.4.0/RIZE-v1.4.0.apk",
+  "releaseUrl": "https://github.com/exieeez2/RIZE/releases/download/v1.4.0/RIZE-v1.4.0.apk",
+  "url": "https://github.com/exieeez2/RIZE/releases/download/v1.4.0/RIZE-v1.4.0.apk",
+  "mirrorUrl": "https://github.com/exieeez2/RIZE/releases/download/v1.4.0/RIZE-v1.4.0.apk",
+  "cdnUrl": "https://cdn.jsdelivr.net/gh/exieeez2/RIZE@main/RIZE-v1.4.0.apk",
+  "releaseNotes": "RIZE v1.4.0 — новая монохромная эмблема, аппаратные жесты плеера, устранение наложения иконок и прямой запуск."
+}

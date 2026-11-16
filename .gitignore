@@ -65,3 +65,8 @@ videos/
 real-app*.png
 RIZE.apk
 RIZE.AppImage
+
+# Whitelist release version files for in-app updates
+!version.json
+!latest-android.json
+!android/version.json
